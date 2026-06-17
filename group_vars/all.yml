@@ -1,0 +1,28 @@
+---
+# Homebrew taps (needed before cask installs)
+homebrew_taps:
+  - manaflow-ai/cmux
+
+# Homebrew casks (GUI apps)
+homebrew_casks:
+  - obsidian
+  - 1password
+  - claude
+  - visual-studio-code
+  - cmux
+
+# Mac App Store apps
+mas_apps:
+  - { id: 937984704, name: "Amphetamine" }
+
+# Homebrew formulae (CLI tools)
+homebrew_formulae:
+  - node
+
+# npm global packages
+npm_global_packages:
+  - "@anthropic-ai/claude-code"
+
+# macOS settings
+macos_show_hidden_files: true
+macos_minimize_to_application: true

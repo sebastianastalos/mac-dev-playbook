@@ -1,0 +1,13 @@
+---
+- name: Install mas (Mac App Store CLI)
+  community.general.homebrew:
+    name: mas
+    state: present
+
+- name: Install App Store apps
+  ansible.builtin.shell: "mas install {{ item.id }}"
+  register: mas_install
+  changed_when: "'already installed' not in mas_install.stdout"
+  loop: "{{ mas_apps }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.id }})"

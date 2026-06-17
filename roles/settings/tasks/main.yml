@@ -1,0 +1,16 @@
+---
+- name: Show hidden files in Finder
+  community.general.osx_defaults:
+    domain: com.apple.finder
+    key: AppleShowAllFiles
+    type: bool
+    value: "{{ macos_show_hidden_files }}"
+  notify: Restart Finder
+
+- name: Minimize windows into application icon
+  community.general.osx_defaults:
+    domain: com.apple.dock
+    key: minimize-to-application
+    type: bool
+    value: "{{ macos_minimize_to_application }}"
+  notify: Restart Dock

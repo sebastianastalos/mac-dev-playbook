@@ -1,0 +1,17 @@
+---
+- name: Configure MacBook
+  hosts: localhost
+  connection: local
+
+  pre_tasks:
+    - name: Verify running on macOS
+      ansible.builtin.assert:
+        that: ansible_distribution == 'MacOSX'
+        fail_msg: "This playbook only runs on macOS. Detected: {{ ansible_distribution }}"
+        success_msg: "Running on macOS {{ ansible_distribution_version }}"
+
+  roles:
+    - homebrew
+    - appstore
+    - dev_tools
+    - settings
