@@ -18,6 +18,7 @@ mas_apps:
 # Homebrew formulae (CLI tools)
 homebrew_formulae:
   - node
+  - gh
 
 # npm global packages
 npm_global_packages:
