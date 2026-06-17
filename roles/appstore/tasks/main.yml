@@ -5,9 +5,9 @@
     state: present
 
 - name: Install App Store apps
-  ansible.builtin.shell: "mas install {{ item.id }}"
-  register: mas_install
-  changed_when: "'already installed' not in mas_install.stdout"
+  ansible.builtin.command: "mas install {{ item.id }}"
+  register: appstore_mas_install
+  changed_when: "'already installed' not in appstore_mas_install.stdout"
   loop: "{{ mas_apps }}"
   loop_control:
     label: "{{ item.name }} ({{ item.id }})"
