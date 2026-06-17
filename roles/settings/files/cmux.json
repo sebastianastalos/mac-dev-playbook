@@ -7,7 +7,8 @@
     "confirmQuit": "whenMultiple",
     "hideTabCloseButton": true,
     "warnBeforeClosingTab": false,
-    "newWorkspacePlacement": "afterCurrent"
+    "newWorkspacePlacement": "afterCurrent",
+    "windowTitleTemplate": "{activeWorkspace} – {activeDirectory}"
   },
 
   "terminal": {
