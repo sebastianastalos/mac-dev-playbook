@@ -1,4 +1,23 @@
 ---
+- name: Create Ghostty config directory
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/ghostty"
+    state: directory
+    mode: "0755"
+
+- name: Configure Ghostty
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/ghostty/config"
+    marker: "# {mark} ANSIBLE MANAGED"
+    create: true
+    mode: "0644"
+    block: |
+      font-family = JetBrainsMono Nerd Font
+      font-size = 14
+      background-opacity = 0.92
+      background-blur-radius = 20
+      window-show-tab-bar = false
+
 - name: Throttle Homebrew auto-update to once a week
   ansible.builtin.lineinfile:
     path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
