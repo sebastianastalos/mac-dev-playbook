@@ -1,4 +1,16 @@
 ---
+- name: Create cmux config directory
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/cmux"
+    state: directory
+    mode: "0755"
+
+- name: Deploy cmux config
+  ansible.builtin.copy:
+    src: cmux.json
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/cmux/cmux.json"
+    mode: "0644"
+
 - name: Create Ghostty config directory
   ansible.builtin.file:
     path: "{{ ansible_facts['env']['HOME'] }}/.config/ghostty"

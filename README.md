@@ -64,7 +64,9 @@ Some things can't be automated and must be done before or after running the play
 - **Git** – User identity, default branch (`main`), `pull.rebase`, global `.gitignore`
 - **Dock** – Pins apps in order: Obsidian, VS Code, Claude, 1Password, cmux
 - **SSH** – Generates an `ed25519` keypair if one doesn't exist
-- **Shell** – Adds aliases to `~/.zshrc` for git and Docker workflows
+- **Shell** – Adds aliases to `~/.zshrc` for git and Docker workflows (see [ALIASES.md](docs/ALIASES.md))
+- **cmux** – Deploys `~/.config/cmux/cmux.json` with appearance and notification settings
+- **Ghostty** – Configures font (JetBrainsMono Nerd Font), background blur, and tab bar
 
 ## Customisation
 
