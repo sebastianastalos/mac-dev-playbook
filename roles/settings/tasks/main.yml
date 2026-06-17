@@ -19,6 +19,9 @@
       alias dlogs='docker logs'
       alias dinspect='docker inspect'
 
+      # Claude Code
+      alias cc='claude'
+
 - name: Show hidden files in Finder
   community.general.osx_defaults:
     domain: com.apple.finder
