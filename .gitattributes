@@ -1,0 +1,7 @@
+# Normalize line endings
+* text=auto eol=lf
+
+# Language detection
+*.yml linguist-detectable=true linguist-language=YAML
+*.yaml linguist-detectable=true linguist-language=YAML
+Makefile linguist-detectable=true
