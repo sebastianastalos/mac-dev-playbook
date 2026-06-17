@@ -5,7 +5,7 @@ help: ## Show available commands
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 setup: ## Install required Ansible collections
-	ansible-galaxy collection install community.general
+	ansible-galaxy collection install community.general community.crypto
 
 run: ## Run the playbook
 	ansible-playbook playbook.yml --ask-become-pass

@@ -102,3 +102,31 @@
     key: DSDontWriteNetworkStores
     type: bool
     value: true
+
+- name: Keyboard - disable press-and-hold in favour of key repeat
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: ApplePressAndHoldEnabled
+    type: bool
+    value: false
+
+- name: Keyboard - set fast initial key repeat
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: InitialKeyRepeat
+    type: int
+    value: 20
+
+- name: Keyboard - set fast key repeat rate
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: KeyRepeat
+    type: int
+    value: 1
+
+- name: Generate SSH keypair if absent
+  community.crypto.openssh_keypair:
+    path: "{{ ansible_env.HOME }}/.ssh/id_ed25519"
+    type: ed25519
+    comment: "{{ git_user_email }}"
+    state: present
