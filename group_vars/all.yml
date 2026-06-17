@@ -34,7 +34,7 @@ git_user_email: "96073170+sebastianastalos@users.noreply.github.com"
 # macOS settings
 macos_show_hidden_files: true
 macos_minimize_to_application: true
-macos_screenshots_folder: "{{ ansible_env.HOME }}/Screenshots"
+macos_screenshots_folder: "{{ ansible_facts['env']['HOME'] }}/Screenshots"
 
 # Dock items (pinned apps in order)
 dock_items:

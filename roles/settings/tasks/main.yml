@@ -1,14 +1,14 @@
 ---
 - name: Throttle Homebrew auto-update to once a week
   ansible.builtin.lineinfile:
-    path: "{{ ansible_env.HOME }}/.zshrc"
+    path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
     line: "export HOMEBREW_AUTO_UPDATE_SECS=604800"
     create: true
     mode: "0644"
 
 - name: Add shell aliases
   ansible.builtin.blockinfile:
-    path: "{{ ansible_env.HOME }}/.zshrc"
+    path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
     marker: "# {mark} ANSIBLE MANAGED ALIASES"
     block: |
       # Git
@@ -62,14 +62,14 @@
 - name: Copy global gitignore
   ansible.builtin.copy:
     src: gitignore_global
-    dest: "{{ ansible_env.HOME }}/.gitignore"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.gitignore"
     mode: "0644"
 
 - name: Set global gitignore in git config
   community.general.git_config:
     name: core.excludesfile
     scope: global
-    value: "{{ ansible_env.HOME }}/.gitignore"
+    value: "{{ ansible_facts['env']['HOME'] }}/.gitignore"
 
 - name: Create screenshots folder
   ansible.builtin.file:
@@ -146,7 +146,7 @@
 
 - name: Generate SSH keypair if absent
   community.crypto.openssh_keypair:
-    path: "{{ ansible_env.HOME }}/.ssh/id_ed25519"
+    path: "{{ ansible_facts['env']['HOME'] }}/.ssh/id_ed25519"
     type: ed25519
     comment: "{{ git_user_email }}"
     state: present
