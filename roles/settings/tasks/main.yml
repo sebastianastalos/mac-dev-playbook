@@ -58,6 +58,9 @@
       # Claude Code
       alias cld='claude'
 
+      # Terminal
+      alias cl='clear'
+
 - name: Show hidden files in Finder
   community.general.osx_defaults:
     domain: com.apple.finder
