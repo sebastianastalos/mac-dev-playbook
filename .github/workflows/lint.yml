@@ -13,5 +13,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ansible-lint
+        run: pip install ansible-lint
+
       - name: Run ansible-lint
-        uses: ansible/ansible-lint@v24
+        run: ansible-lint
