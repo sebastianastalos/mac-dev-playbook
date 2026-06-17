@@ -6,6 +6,23 @@
     create: true
     mode: "0644"
 
+- name: Add cmux branch status hook
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
+    marker: "# {mark} ANSIBLE MANAGED CMUX HOOKS"
+    block: |
+      _cmux_update_branch() {
+        if command -v cmux &>/dev/null && git rev-parse --git-dir &>/dev/null 2>&1; then
+          local branch=$(git branch --show-current 2>/dev/null)
+          if [[ -n "$branch" ]]; then
+            cmux set-status branch "$branch" --icon "arrow.triangle.branch" 2>/dev/null
+          else
+            cmux clear-status branch 2>/dev/null
+          fi
+        fi
+      }
+      precmd_functions+=(_cmux_update_branch)
+
 - name: Add shell aliases
   ansible.builtin.blockinfile:
     path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
