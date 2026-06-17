@@ -27,6 +27,18 @@
     scope: global
     value: "{{ git_user_email }}"
 
+- name: Copy global gitignore
+  ansible.builtin.copy:
+    src: gitignore_global
+    dest: "{{ ansible_env.HOME }}/.gitignore"
+    mode: "0644"
+
+- name: Set global gitignore in git config
+  community.general.git_config:
+    name: core.excludesfile
+    scope: global
+    value: "{{ ansible_env.HOME }}/.gitignore"
+
 - name: Create screenshots folder
   ansible.builtin.file:
     path: "{{ macos_screenshots_folder }}"
