@@ -14,3 +14,16 @@
     type: bool
     value: "{{ macos_minimize_to_application }}"
   notify: Restart Dock
+
+- name: Create screenshots folder
+  ansible.builtin.file:
+    path: "{{ macos_screenshots_folder }}"
+    state: directory
+    mode: "0755"
+
+- name: Set screenshots save location
+  community.general.osx_defaults:
+    domain: com.apple.screencapture
+    key: location
+    type: string
+    value: "{{ macos_screenshots_folder }}"

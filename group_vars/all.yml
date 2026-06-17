@@ -10,6 +10,8 @@ homebrew_casks:
   - claude
   - visual-studio-code
   - cmux
+  - docker
+  - tailscale
 
 # Mac App Store apps
 mas_apps:
@@ -19,6 +21,7 @@ mas_apps:
 homebrew_formulae:
   - node
   - gh
+  - dockutil
 
 # npm global packages
 npm_global_packages:
@@ -27,3 +30,17 @@ npm_global_packages:
 # macOS settings
 macos_show_hidden_files: true
 macos_minimize_to_application: true
+macos_screenshots_folder: "{{ ansible_env.HOME }}/Screenshots"
+
+# Dock items (pinned apps in order)
+dock_items:
+  - name: Obsidian
+    path: /Applications/Obsidian.app
+  - name: Visual Studio Code
+    path: /Applications/Visual Studio Code.app
+  - name: Claude
+    path: /Applications/Claude.app
+  - name: 1Password
+    path: /Applications/1Password.app
+  - name: cmux
+    path: /Applications/cmux.app

@@ -1,0 +1,16 @@
+---
+- name: Clear existing Dock items
+  ansible.builtin.command: dockutil --remove all --no-restart
+  changed_when: true
+
+- name: Pin apps to Dock
+  ansible.builtin.command: >
+    dockutil --add "{{ item.path }}" --no-restart
+  loop: "{{ dock_items }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: true
+
+- name: Restart Dock
+  ansible.builtin.command: killall Dock
+  changed_when: false
