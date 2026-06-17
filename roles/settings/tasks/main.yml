@@ -15,6 +15,18 @@
     value: "{{ macos_minimize_to_application }}"
   notify: Restart Dock
 
+- name: Set git user name
+  community.general.git_config:
+    name: user.name
+    scope: global
+    value: "{{ git_user_name }}"
+
+- name: Set git user email
+  community.general.git_config:
+    name: user.email
+    scope: global
+    value: "{{ git_user_email }}"
+
 - name: Create screenshots folder
   ansible.builtin.file:
     path: "{{ macos_screenshots_folder }}"

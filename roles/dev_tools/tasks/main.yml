@@ -5,3 +5,7 @@
     global: true
     state: present
   loop: "{{ npm_global_packages }}"
+
+- name: Configure gh as git credential helper
+  ansible.builtin.command: gh auth setup-git
+  changed_when: false

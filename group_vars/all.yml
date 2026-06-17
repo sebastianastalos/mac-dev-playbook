@@ -27,6 +27,10 @@ homebrew_formulae:
 npm_global_packages:
   - "@anthropic-ai/claude-code"
 
+# Git identity
+git_user_name: "sebastianastalos"
+git_user_email: "sebastianastalos@outlook.com"
+
 # macOS settings
 macos_show_hidden_files: true
 macos_minimize_to_application: true
