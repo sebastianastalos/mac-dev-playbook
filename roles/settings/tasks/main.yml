@@ -20,7 +20,7 @@
       alias dinspect='docker inspect'
 
       # Claude Code
-      alias cc='claude'
+      alias cld='claude'
 
 - name: Show hidden files in Finder
   community.general.osx_defaults:
