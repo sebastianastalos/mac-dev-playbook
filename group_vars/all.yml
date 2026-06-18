@@ -14,6 +14,7 @@ homebrew_casks:
   - tailscale
   - font-jetbrains-mono-nerd-font
   - alfred
+  - hiddenbar
 
 # Mac App Store apps
 mas_apps:
