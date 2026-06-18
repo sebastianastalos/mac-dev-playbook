@@ -13,6 +13,7 @@ homebrew_casks:
   - docker
   - tailscale
   - font-jetbrains-mono-nerd-font
+  - alfred
 
 # Mac App Store apps
 mas_apps:

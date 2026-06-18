@@ -89,6 +89,14 @@
     value: "{{ macos_minimize_to_application }}"
   notify: Restart Dock
 
+- name: Dock - hide suggested and recent apps
+  community.general.osx_defaults:
+    domain: com.apple.dock
+    key: show-recents
+    type: bool
+    value: false
+  notify: Restart Dock
+
 - name: Set git user name
   community.general.git_config:
     name: user.name
