@@ -8,7 +8,7 @@ homebrew_casks:
   - obsidian
   - 1password
   - claude
-  - visual-studio-code
+  - vscodium
   - cmux
   - docker
   - tailscale
@@ -53,8 +53,8 @@ login_items:
 dock_items:
   - name: Obsidian
     path: /Applications/Obsidian.app
-  - name: Visual Studio Code
-    path: /Applications/Visual Studio Code.app
+  - name: VSCodium
+    path: /Applications/VSCodium.app
   - name: Claude
     path: /Applications/Claude.app
   - name: 1Password
