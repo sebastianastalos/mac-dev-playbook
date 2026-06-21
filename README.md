@@ -43,7 +43,7 @@ Some things can't be automated and must be done before or after running the play
 - Obsidian
 - 1Password
 - Claude Desktop
-- Visual Studio Code
+- VSCodium
 - Docker
 - Tailscale
 - cmux
@@ -62,7 +62,7 @@ Some things can't be automated and must be done before or after running the play
 
 - **macOS** – Hidden files, Finder improvements (column view, extensions, status bar), keyboard repeat, screenshots saved to `~/Screenshots`
 - **Git** – User identity, default branch (`main`), `pull.rebase`, global `.gitignore`
-- **Dock** – Pins apps in order: Obsidian, VS Code, Claude, 1Password, cmux
+- **Dock** – Pins apps in order: Obsidian, VSCodium, Claude, 1Password, cmux
 - **SSH** – Generates an `ed25519` keypair if one doesn't exist
 - **Shell** – Adds aliases to `~/.zshrc` for git and Docker workflows (see [ALIASES.md](docs/ALIASES.md))
 - **cmux** – Deploys `~/.config/cmux/cmux.json` with appearance and notification settings
