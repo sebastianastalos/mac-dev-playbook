@@ -7,6 +7,14 @@
   loop: "{{ npm_global_packages }}"
   ignore_errors: "{{ ansible_check_mode }}"
 
+- name: Install VS Code extensions
+  ansible.builtin.command: code --install-extension {{ item }}
+  loop: "{{ vscode_extensions }}"
+  loop_control:
+    label: "{{ item }}"
+  changed_when: false
+  ignore_errors: "{{ ansible_check_mode }}"
+
 - name: Configure gh as git credential helper
   ansible.builtin.command: gh auth setup-git
   changed_when: false

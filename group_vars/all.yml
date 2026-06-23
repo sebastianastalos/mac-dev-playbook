@@ -8,7 +8,7 @@ homebrew_casks:
   - obsidian
   - 1password
   - claude
-  - vscodium
+  - visual-studio-code
   - cmux
   - docker
   - tailscale
@@ -26,6 +26,30 @@ homebrew_formulae:
   - node
   - gh
   - dockutil
+
+# VS Code extensions
+vscode_extensions:
+  - 4ops.terraform
+  - anthropic.claude-code
+  - bierner.markdown-yaml-preamble
+  - emmanuelbeziat.vscode-great-icons
+  - github.github-vscode-theme
+  - github.vscode-pull-request-github
+  - mhutchie.git-graph
+  - miguelsolorio.fluent-icons
+  - ms-vscode-remote.remote-containers
+  - ms-vscode-remote.remote-ssh
+  - ms-vscode-remote.remote-ssh-edit
+  - ms-vscode.remote-explorer
+  - narasimapandiyan.jetbrainsmono
+  - nerudevs.jellyfish-dark
+  - openai.chatgpt
+  - pkief.material-icon-theme
+  - pranjalkumar.minimal-kiwi
+  - redhat.vscode-yaml
+  - usernamehw.errorlens
+  - vscode-icons-team.vscode-icons
+  - wayou.vscode-todo-highlight
 
 # npm global packages
 npm_global_packages:
@@ -53,8 +77,8 @@ login_items:
 dock_items:
   - name: Obsidian
     path: /Applications/Obsidian.app
-  - name: VSCodium
-    path: /Applications/VSCodium.app
+  - name: Visual Studio Code
+    path: /Applications/Visual Studio Code.app
   - name: Claude
     path: /Applications/Claude.app
   - name: 1Password
