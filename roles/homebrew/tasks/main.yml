@@ -15,6 +15,12 @@
   community.general.homebrew:
     update_homebrew: true
 
+- name: Trust Homebrew taps
+  ansible.builtin.command: brew trust {{ item }}
+  loop: "{{ homebrew_taps }}"
+  changed_when: false
+  failed_when: false
+
 - name: Add Homebrew taps
   community.general.homebrew_tap:
     name: "{{ item }}"
@@ -28,5 +34,9 @@
 
 - name: Install Homebrew casks
   community.general.homebrew_cask:
-    name: "{{ homebrew_casks }}"
+    name: "{{ item }}"
     state: present
+  loop: "{{ homebrew_casks }}"
+  loop_control:
+    label: "{{ item }}"
+  ignore_errors: true
