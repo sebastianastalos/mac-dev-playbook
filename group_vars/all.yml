@@ -77,6 +77,14 @@ login_items:
 
 # Dock items (pinned apps in order)
 dock_items:
+  - name: Messages
+    path: /System/Applications/Messages.app
+  - name: Calendar
+    path: /System/Applications/Calendar.app
+  - name: App Store
+    path: /System/Applications/App Store.app
+  - name: System Settings
+    path: /System/Applications/System Settings.app
   - name: Obsidian
     path: /Applications/Obsidian.app
   - name: Visual Studio Code
@@ -87,11 +95,3 @@ dock_items:
     path: /Applications/1Password.app
   - name: cmux
     path: /Applications/cmux.app
-  - name: Messages
-    path: /System/Applications/Messages.app
-  - name: Calendar
-    path: /System/Applications/Calendar.app
-  - name: System Settings
-    path: /System/Applications/System Settings.app
-  - name: App Store
-    path: /System/Applications/App Store.app
