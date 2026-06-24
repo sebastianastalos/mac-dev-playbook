@@ -73,6 +73,13 @@
       # Terminal
       alias cl='clear'
 
+- name: Set dark mode
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: AppleInterfaceStyle
+    type: string
+    value: Dark
+
 - name: Show hidden files in Finder
   community.general.osx_defaults:
     domain: com.apple.finder
