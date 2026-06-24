@@ -72,6 +72,8 @@ login_items:
     path: /Applications/Amphetamine.app
   - name: Stats
     path: /Applications/Stats.app
+  - name: Hidden Bar
+    path: /Applications/Hidden Bar.app
 
 # Dock items (pinned apps in order)
 dock_items:
