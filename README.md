@@ -6,23 +6,28 @@ Ansible playbook to automate setting up a fresh Mac for development.
 
 ## Installation
 
-1. Install Ansible:
+1. Install Homebrew:
    ```bash
-   pip3 install ansible
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
    ```
 
-2. Clone this repository:
+2. Install Ansible:
+   ```bash
+   brew install ansible
+   ```
+
+3. Clone this repository:
    ```bash
    git clone https://github.com/sebastianastalos/mac-dev-playbook.git
    cd mac-dev-playbook
    ```
 
-3. Install required Ansible collections (defined in `requirements.yml`):
+4. Install required Ansible collections (defined in `requirements.yml`):
    ```bash
    make setup
    ```
 
-4. Run the playbook:
+5. Run the playbook:
    ```bash
    make run
    ```
@@ -31,11 +36,13 @@ Ansible playbook to automate setting up a fresh Mac for development.
 
 ## Manual steps required
 
-Some things can't be automated and must be done before or after running the playbook:
+**Before running:**
+- **Mac App Store** – Sign in first. Amphetamine is installed via the App Store.
 
-- **Mac App Store** – Sign in before running the playbook. Amphetamine is installed via the App Store.
-- **GitHub CLI** – Run `gh auth login` after the playbook to authenticate with GitHub.
-- **SSH key** – The playbook generates an SSH keypair at `~/.ssh/id_ed25519`.
+**After running:**
+- **GitHub CLI** – Run `gh auth login` to authenticate, then `make run` again so the credential helper wires up.
+- **SSH key** – The playbook generates `~/.ssh/id_ed25519`. Copy it to any VMs with `ssh-copy-id user@host`.
+- **Sign into apps** – 1Password, Obsidian, Claude, Alfred.
 
 ## What gets installed
 
