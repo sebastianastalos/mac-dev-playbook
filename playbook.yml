@@ -10,6 +10,15 @@
         fail_msg: "This playbook only runs on macOS. Detected: {{ ansible_facts['distribution'] }}"
         success_msg: "Running on macOS {{ ansible_facts['distribution_version'] }}"
 
+    - name: Allow passwordless sudo for admin group
+      ansible.builtin.lineinfile:
+        dest: /etc/sudoers
+        state: present
+        regexp: '^%admin'
+        line: '%admin ALL=(ALL) NOPASSWD: ALL'
+        validate: /usr/sbin/visudo -cf %s
+      become: true
+
   roles:
     - homebrew
     - appstore

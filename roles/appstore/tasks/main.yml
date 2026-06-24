@@ -8,6 +8,7 @@
   ansible.builtin.command: "mas install {{ item.id }}"
   register: appstore_mas_install
   changed_when: "'already installed' not in appstore_mas_install.stdout"
+  ignore_errors: true
   loop: "{{ mas_apps }}"
   loop_control:
     label: "{{ item.name }} ({{ item.id }})"
