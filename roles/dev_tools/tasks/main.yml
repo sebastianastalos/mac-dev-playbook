@@ -17,5 +17,6 @@
 
 - name: Configure gh as git credential helper
   ansible.builtin.command: gh auth setup-git
+  register: gh_setup_result
   changed_when: false
-  ignore_errors: true
+  failed_when: gh_setup_result.rc != 0 and 'not logged into' not in gh_setup_result.stderr

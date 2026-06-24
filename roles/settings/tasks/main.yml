@@ -230,8 +230,9 @@
   loop: "{{ login_items }}"
   loop_control:
     label: "{{ item.name }}"
+  register: login_item_result
   changed_when: false
-  ignore_errors: true
+  failed_when: login_item_result.rc != 0 and 'not allowed to send Apple events' not in (login_item_result.stderr | default(''))
 
 - name: Create .ssh directory
   ansible.builtin.file:

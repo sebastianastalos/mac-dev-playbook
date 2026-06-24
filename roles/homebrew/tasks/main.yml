@@ -39,4 +39,5 @@
   loop: "{{ homebrew_casks }}"
   loop_control:
     label: "{{ item }}"
-  ignore_errors: true
+  register: cask_result
+  failed_when: cask_result.failed and 'already an App at' not in (cask_result.msg | default(''))
