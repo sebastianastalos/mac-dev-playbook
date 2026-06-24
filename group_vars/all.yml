@@ -91,3 +91,7 @@ dock_items:
     path: /System/Applications/Messages.app
   - name: Calendar
     path: /System/Applications/Calendar.app
+  - name: System Settings
+    path: /System/Applications/System Settings.app
+  - name: App Store
+    path: /System/Applications/App Store.app
