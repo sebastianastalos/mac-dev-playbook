@@ -226,6 +226,12 @@
   changed_when: false
   ignore_errors: true
 
+- name: Create .ssh directory
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.ssh"
+    state: directory
+    mode: "0700"
+
 - name: Generate SSH keypair if absent
   community.crypto.openssh_keypair:
     path: "{{ ansible_facts['env']['HOME'] }}/.ssh/id_ed25519"
