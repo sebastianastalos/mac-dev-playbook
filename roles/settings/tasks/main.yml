@@ -207,16 +207,24 @@
     value: 1
 
 - name: Add apps to login items
-  ansible.builtin.command: >
-    osascript -e 'tell application "System Events"
-    if not (exists login item "{{ item.name }}") then
-    make login item at end with properties {path:"{{ item.path }}", hidden:false}
-    end if
-    end tell'
+  ansible.builtin.command:
+    argv:
+      - osascript
+      - -e
+      - 'tell application "System Events"'
+      - -e
+      - 'if not (exists login item "{{ item.name }}") then'
+      - -e
+      - 'make login item at end with properties {path:"{{ item.path }}", hidden:false}'
+      - -e
+      - 'end if'
+      - -e
+      - 'end tell'
   loop: "{{ login_items }}"
   loop_control:
     label: "{{ item.name }}"
   changed_when: false
+  ignore_errors: true
 
 - name: Generate SSH keypair if absent
   community.crypto.openssh_keypair:
