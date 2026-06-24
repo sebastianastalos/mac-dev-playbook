@@ -18,3 +18,4 @@
 - name: Configure gh as git credential helper
   ansible.builtin.command: gh auth setup-git
   changed_when: false
+  ignore_errors: true
