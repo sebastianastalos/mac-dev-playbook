@@ -73,6 +73,36 @@
       # Terminal
       alias cl='clear'
 
+- name: Mission Control - group windows by application
+  community.general.osx_defaults:
+    domain: com.apple.dock
+    key: expose-group-by-app
+    type: bool
+    value: true
+  notify: Restart Dock
+
+- name: Mission Control - switch to Space with open windows on app activate
+  community.general.osx_defaults:
+    domain: NSGlobalDomain
+    key: AppleSpacesSwitchOnActivate
+    type: bool
+    value: true
+
+- name: Mission Control - displays have separate Spaces
+  community.general.osx_defaults:
+    domain: com.apple.spaces
+    key: spans-displays
+    type: bool
+    value: false
+
+- name: Mission Control - do not auto-rearrange Spaces by recent use
+  community.general.osx_defaults:
+    domain: com.apple.dock
+    key: mru-spaces
+    type: bool
+    value: false
+  notify: Restart Dock
+
 - name: Set dark mode
   community.general.osx_defaults:
     domain: NSGlobalDomain
