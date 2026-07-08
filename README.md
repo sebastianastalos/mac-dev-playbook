@@ -61,6 +61,11 @@ Ansible playbook to automate setting up a fresh Mac for development.
 **CLI tools (Homebrew):**
 - GitHub CLI (`gh`)
 - dockutil
+- Terraform
+- Packer
+- 1Password CLI (`op`)
+- ansible-lint
+- yamllint
 
 **npm:**
 - Claude Code (`@anthropic-ai/claude-code`)

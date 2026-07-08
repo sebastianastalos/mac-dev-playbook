@@ -2,6 +2,7 @@
 # Homebrew taps (needed before cask installs)
 homebrew_taps:
   - manaflow-ai/cmux
+  - hashicorp/tap
 
 # Homebrew casks (GUI apps)
 homebrew_casks:
@@ -16,6 +17,7 @@ homebrew_casks:
   - alfred
   - hiddenbar
   - stats
+  - 1password-cli
 
 # Mac App Store apps
 mas_apps:
@@ -26,6 +28,10 @@ homebrew_formulae:
   - node
   - gh
   - dockutil
+  - hashicorp/tap/terraform
+  - hashicorp/tap/packer
+  - ansible-lint
+  - yamllint
 
 # VS Code extensions
 vscode_extensions:
