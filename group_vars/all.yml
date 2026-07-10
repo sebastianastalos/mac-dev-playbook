@@ -15,7 +15,7 @@ homebrew_casks:
   - tailscale
   - font-jetbrains-mono-nerd-font
   - alfred
-  - hiddenbar
+  - jordanbaird-ice
   - stats
   - 1password-cli
 
@@ -78,8 +78,8 @@ login_items:
     path: /Applications/Amphetamine.app
   - name: Stats
     path: /Applications/Stats.app
-  - name: Hidden Bar
-    path: /Applications/Hidden Bar.app
+  - name: Ice
+    path: /Applications/Ice.app
 
 # Dock items (pinned apps in order)
 dock_items:
