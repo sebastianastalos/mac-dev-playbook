@@ -16,6 +16,7 @@ homebrew_casks:
   - font-jetbrains-mono-nerd-font
   - alfred
   - jordanbaird-ice
+  - finetune
   - stats
   - 1password-cli
 
@@ -80,6 +81,8 @@ login_items:
     path: /Applications/Stats.app
   - name: Ice
     path: /Applications/Ice.app
+  - name: FineTune
+    path: /Applications/FineTune.app
 
 # Dock items (pinned apps in order)
 dock_items:
