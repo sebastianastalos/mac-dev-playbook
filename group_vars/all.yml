@@ -17,8 +17,15 @@ homebrew_casks:
   - alfred
   - jordanbaird-ice
   - finetune
+  - mos
   - stats
   - 1password-cli
+  - shottr
+  - discord
+  - slack
+  - firefox
+  - spotify
+  - chatgpt
 
 # Mac App Store apps
 mas_apps:
@@ -83,24 +90,42 @@ login_items:
     path: /Applications/Ice.app
   - name: FineTune
     path: /Applications/FineTune.app
+  - name: Mos
+    path: /Applications/Mos.app
 
 # Dock items (pinned apps in order)
 dock_items:
-  - name: Messages
-    path: /System/Applications/Messages.app
   - name: Calendar
     path: /System/Applications/Calendar.app
-  - name: App Store
-    path: /System/Applications/App Store.app
   - name: System Settings
     path: /System/Applications/System Settings.app
-  - name: Obsidian
-    path: /Applications/Obsidian.app
+  - name: Messages
+    path: /System/Applications/Messages.app
+  - name: App Store
+    path: /System/Applications/App Store.app
+  - name: Docker
+    path: /Applications/Docker.app
+  - name: Discord
+    path: /Applications/Discord.app
+  - name: Safari
+    path: /System/Applications/Safari.app
   - name: Visual Studio Code
     path: /Applications/Visual Studio Code.app
-  - name: Claude
-    path: /Applications/Claude.app
-  - name: 1Password
-    path: /Applications/1Password.app
+  - name: Slack
+    path: /Applications/Slack.app
+  - name: Firefox
+    path: /Applications/Firefox.app
   - name: cmux
     path: /Applications/cmux.app
+  - name: 1Password
+    path: /Applications/1Password.app
+  - name: Obsidian
+    path: /Applications/Obsidian.app
+  - name: Launchpad
+    path: /System/Applications/Launchpad.app
+  - name: Spotify
+    path: /Applications/Spotify.app
+  - name: Claude
+    path: /Applications/Claude.app
+  - name: ChatGPT
+    path: /Applications/ChatGPT.app
