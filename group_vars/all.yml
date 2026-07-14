@@ -22,7 +22,7 @@ homebrew_casks:
   - 1password-cli
   - shottr
   - discord
-  - slack
+
   - firefox
   - spotify
   - chatgpt
@@ -111,8 +111,7 @@ dock_items:
     path: /System/Applications/Safari.app
   - name: Visual Studio Code
     path: /Applications/Visual Studio Code.app
-  - name: Slack
-    path: /Applications/Slack.app
+
   - name: Firefox
     path: /Applications/Firefox.app
   - name: cmux
