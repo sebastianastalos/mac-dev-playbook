@@ -15,7 +15,7 @@ homebrew_casks:
   - tailscale
   - font-jetbrains-mono-nerd-font
   - alfred
-  - jordanbaird-ice
+
   - finetune
   - mos
   - stats
@@ -86,8 +86,7 @@ login_items:
     path: /Applications/Amphetamine.app
   - name: Stats
     path: /Applications/Stats.app
-  - name: Ice
-    path: /Applications/Ice.app
+
   - name: FineTune
     path: /Applications/FineTune.app
   - name: Mos
