@@ -69,6 +69,24 @@ vscode_extensions:
 npm_global_packages:
   - "@anthropic-ai/claude-code"
 
+# Agent skills, installed globally by the `skills` CLI into ~/.agents/skills
+# and symlinked into ~/.claude/skills. `provides` is a sentinel list used to
+# skip the install when those skills are already in ~/.agents/.skill-lock.json.
+agent_skill_packages:
+  - package: manaflow-ai/cmux
+    provides:
+      - cmux
+      - cmux-browser
+      - cmux-workspace
+  - package: manaflow-ai/cmux-skills
+    provides:
+      - cmux-cli
+      - cmux-config
+      - cmux-ref
+
+# Run `skills update` on every playbook run to pull newer skill versions
+agent_skills_update: false
+
 # Git identity
 git_user_name: "sebastianastalos"
 git_user_email: "96073170+sebastianastalos@users.noreply.github.com"

@@ -1,0 +1,33 @@
+---
+# Agent skills are installed by the `skills` CLI into ~/.agents/skills and
+# symlinked into each agent's directory (~/.claude/skills for Claude Code).
+# The install is recorded in ~/.agents/.skill-lock.json.
+
+- name: Check which agent skills are already installed
+  ansible.builtin.slurp:
+    src: "{{ ansible_facts['env']['HOME'] }}/.agents/.skill-lock.json"
+  register: agent_skills_lock
+  failed_when: false
+  changed_when: false
+
+- name: Record installed skill names
+  ansible.builtin.set_fact:
+    agent_skills_installed: >-
+      {{ (agent_skills_lock.content | b64decode | from_json).skills.keys()
+         | list if agent_skills_lock.content is defined else [] }}
+
+- name: Install agent skill packages
+  ansible.builtin.command: >-
+    npx --yes skills add {{ item.package }} --global --all
+  loop: "{{ agent_skill_packages }}"
+  loop_control:
+    label: "{{ item.package }}"
+  when: item.provides | difference(agent_skills_installed) | length > 0
+  changed_when: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Update agent skills to latest versions
+  ansible.builtin.command: npx --yes skills update --global --yes
+  when: agent_skills_update | bool
+  changed_when: false
+  ignore_errors: "{{ ansible_check_mode }}"
