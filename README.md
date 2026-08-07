@@ -44,6 +44,10 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **GitHub CLI** – Run `gh auth login` to authenticate, then `make run` again so the credential helper wires up.
 - **SSH key** – The playbook generates `~/.ssh/id_ed25519`. Copy it to any VMs with `ssh-copy-id user@host`.
 - **Sign into apps** – 1Password, Obsidian, Claude, Alfred.
+- **1Password SSH agent** – Turn on *Settings → Developer → Use the SSH Agent*. This can't be
+  automated: `sshAgent.enabled` in 1Password's `settings.json` is protected by an HMAC in the
+  same file's `authTags`, so an out-of-band edit is detectable. The playbook wires `ssh` up to
+  the agent socket, but the toggle itself is one manual click.
 
 ## What gets installed
 
@@ -78,7 +82,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **Apple Passwords** – Turns off autofill system-wide, so only 1Password offers logins. Also stops "save your password?" prompts and Hide My Email suggestions
 - **Git** – User identity, default branch (`main`), `pull.rebase`, global `.gitignore`
 - **Dock** – Pins apps in order: Obsidian, VS Code, Claude, 1Password, cmux
-- **SSH** – Generates an `ed25519` keypair if one doesn't exist
+- **SSH** – Generates an `ed25519` keypair if one doesn't exist, and points `ssh` at the 1Password SSH agent via `IdentityAgent` in `~/.ssh/config` plus `SSH_AUTH_SOCK` in `~/.zshrc`
 - **Shell** – Adds aliases to `~/.zshrc` for git and Docker workflows (see [ALIASES.md](docs/ALIASES.md))
 - **cmux** – Deploys `~/.config/cmux/cmux.json` with appearance and notification settings
 - **Ghostty** – Configures font (JetBrainsMono Nerd Font), background blur, and tab bar

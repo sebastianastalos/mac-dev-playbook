@@ -87,6 +87,10 @@ agent_skill_packages:
 # Run `skills update` on every playbook run to pull newer skill versions
 agent_skills_update: false
 
+# 1Password SSH agent socket, relative to $HOME (2BUA8C4S2C is 1Password's
+# team ID). Enabling the agent itself is a manual step – see README.
+op_agent_sock: "Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+
 # Git identity
 git_user_name: "sebastianastalos"
 git_user_email: "96073170+sebastianastalos@users.noreply.github.com"

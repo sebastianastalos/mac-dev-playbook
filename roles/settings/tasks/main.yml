@@ -296,3 +296,26 @@
     type: ed25519
     comment: "{{ git_user_email }}"
     state: present
+
+# Serves keys from the 1Password vault, so ssh needs no key on disk.
+# Host * goes last so any host-specific blocks above still win.
+- name: Point ssh at the 1Password SSH agent
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_facts['env']['HOME'] }}/.ssh/config"
+    marker: "# {mark} ANSIBLE MANAGED 1PASSWORD AGENT"
+    create: true
+    mode: "0600"
+    block: |
+      Host *
+        IdentityAgent "~/{{ op_agent_sock }}"
+
+# ssh itself uses IdentityAgent above. This covers tools that speak the agent
+# protocol directly without reading ssh_config, such as ssh-add.
+- name: Export SSH_AUTH_SOCK for the 1Password agent
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_facts['env']['HOME'] }}/.zshrc"
+    marker: "# {mark} ANSIBLE MANAGED SSH AGENT"
+    create: true
+    mode: "0644"
+    block: |
+      export SSH_AUTH_SOCK="$HOME/{{ op_agent_sock }}"
