@@ -44,6 +44,9 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **GitHub CLI** – Run `gh auth login` to authenticate, then `make run` again so the credential helper wires up.
 - **SSH key** – The playbook generates `~/.ssh/id_ed25519`. Copy it to any VMs with `ssh-copy-id user@host`.
 - **Sign into apps** – 1Password, Obsidian, Claude, Alfred.
+- **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password
+  and Wipr in *Safari → Settings → Extensions*. Safari records an `EnabledByUserGesture` flag
+  per extension, so a scripted flip is unlikely to be honoured.
 - **1Password SSH agent** – Turn on *Settings → Developer → Use the SSH Agent*. This can't be
   automated: `sshAgent.enabled` in 1Password's `settings.json` is protected by an HMAC in the
   same file's `authTags`, so an out-of-band edit is detectable. The playbook wires `ssh` up to
@@ -62,6 +65,8 @@ Ansible playbook to automate setting up a fresh Mac for development.
 
 **App Store:**
 - Amphetamine
+- 1Password for Safari (Safari extension)
+- Wipr (Safari content blocker)
 
 **CLI tools (Homebrew):**
 - GitHub CLI (`gh`)

@@ -27,9 +27,16 @@ homebrew_casks:
   - spotify
   - chatgpt
 
-# Mac App Store apps
+# Mac App Store apps. Safari extensions are App Store-only – the 1password cask
+# does not bundle "1Password for Safari". Both still need enabling by hand in
+# Safari > Settings > Extensions; see README.
 mas_apps:
-  - { id: 937984704, name: "Amphetamine" }
+  - id: 937984704
+    name: "Amphetamine"
+  - id: 1569813296
+    name: "1Password for Safari"
+  - id: 1662217862
+    name: "Wipr"
 
 # Homebrew formulae (CLI tools)
 homebrew_formulae:
