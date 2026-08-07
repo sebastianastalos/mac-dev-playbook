@@ -252,9 +252,17 @@
     type: bool
     value: "{{ safari_autocorrect }}"
 
+# Stops the iCloud "Hide My Email" row appearing in email fields. Verified on
+# macOS 26.6. Trade-off: Safari no longer offers name/address/phone in forms.
+- name: Safari - disable contacts autofill
+  community.general.osx_defaults:
+    domain: com.apple.Safari
+    key: AutoFillFromAddressBook
+    type: bool
+    value: "{{ safari_autofill_from_contacts }}"
+
 # Despite the Safari domain, this backs the system-wide "AutoFill Passwords and
-# Passkeys" switch in System Settings > General > AutoFill & Passwords. Off also
-# stops the "save your password?" prompts and Hide My Email suggestions.
+# Passkeys" switch in System Settings > General > AutoFill & Passwords.
 # Verified on macOS 26.6: flipping this key moves that toggle.
 - name: Disable Apple Passwords autofill system-wide
   community.general.osx_defaults:

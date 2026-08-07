@@ -102,6 +102,8 @@ macos_screenshots_folder: "{{ ansible_facts['env']['HOME'] }}/Screenshots"
 
 # Safari settings
 safari_autocorrect: false
+# Off also hides the iCloud "Hide My Email" suggestion in email fields
+safari_autofill_from_contacts: false
 
 # Apple Passwords autofill, system-wide (settings role notes the domain quirk).
 # Off so it doesn't crowd out 1Password, prompt to save, or offer Hide My Email.

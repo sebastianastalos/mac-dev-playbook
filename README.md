@@ -78,8 +78,8 @@ Ansible playbook to automate setting up a fresh Mac for development.
 ## What gets configured
 
 - **macOS** – Hidden files, Finder improvements (column view, extensions, status bar), keyboard repeat, screenshots saved to `~/Screenshots`
-- **Safari** – Turns off auto-correct
-- **Apple Passwords** – Turns off autofill system-wide, so only 1Password offers logins. Also stops "save your password?" prompts and Hide My Email suggestions
+- **Safari** – Turns off auto-correct, and turns off contacts autofill so the iCloud "Hide My Email" suggestion stops appearing in email fields
+- **Apple Passwords** – Turns off autofill system-wide, so only 1Password offers logins
 - **Git** – User identity, default branch (`main`), `pull.rebase`, global `.gitignore`
 - **Dock** – Pins apps in order: Obsidian, VS Code, Claude, 1Password, cmux
 - **SSH** – Generates an `ed25519` keypair if one doesn't exist, and points `ssh` at the 1Password SSH agent via `IdentityAgent` in `~/.ssh/config` plus `SSH_AUTH_SOCK` in `~/.zshrc`
