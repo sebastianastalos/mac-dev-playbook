@@ -38,6 +38,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 
 **Before running:**
 - **Mac App Store** – Sign in first. Amphetamine is installed via the App Store.
+- **Quit Safari** – Safari rewrites its own prefs on exit, so the Safari tasks only stick if it's closed.
 
 **After running:**
 - **GitHub CLI** – Run `gh auth login` to authenticate, then `make run` again so the credential helper wires up.
@@ -73,6 +74,8 @@ Ansible playbook to automate setting up a fresh Mac for development.
 ## What gets configured
 
 - **macOS** – Hidden files, Finder improvements (column view, extensions, status bar), keyboard repeat, screenshots saved to `~/Screenshots`
+- **Safari** – Turns off auto-correct
+- **Apple Passwords** – Turns off autofill system-wide, so only 1Password offers logins. Also stops "save your password?" prompts and Hide My Email suggestions
 - **Git** – User identity, default branch (`main`), `pull.rebase`, global `.gitignore`
 - **Dock** – Pins apps in order: Obsidian, VS Code, Claude, 1Password, cmux
 - **SSH** – Generates an `ed25519` keypair if one doesn't exist

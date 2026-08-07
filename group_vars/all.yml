@@ -96,6 +96,13 @@ macos_show_hidden_files: true
 macos_minimize_to_application: true
 macos_screenshots_folder: "{{ ansible_facts['env']['HOME'] }}/Screenshots"
 
+# Safari settings
+safari_autocorrect: false
+
+# Apple Passwords autofill, system-wide (settings role notes the domain quirk).
+# Off so it doesn't crowd out 1Password, prompt to save, or offer Hide My Email.
+macos_autofill_passwords: false
+
 # Apps to open at login
 login_items:
   - name: Alfred 5

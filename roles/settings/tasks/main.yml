@@ -243,6 +243,26 @@
     type: int
     value: 1
 
+# Safari stores its prefs inside its sandbox container. Writes only stick while
+# Safari is quit – it overwrites the plist from memory on exit otherwise.
+- name: Safari - disable auto-correct spelling
+  community.general.osx_defaults:
+    domain: com.apple.Safari
+    key: WebAutomaticSpellingCorrectionEnabled
+    type: bool
+    value: "{{ safari_autocorrect }}"
+
+# Despite the Safari domain, this backs the system-wide "AutoFill Passwords and
+# Passkeys" switch in System Settings > General > AutoFill & Passwords. Off also
+# stops the "save your password?" prompts and Hide My Email suggestions.
+# Verified on macOS 26.6: flipping this key moves that toggle.
+- name: Disable Apple Passwords autofill system-wide
+  community.general.osx_defaults:
+    domain: com.apple.Safari
+    key: AutoFillPasswords
+    type: bool
+    value: "{{ macos_autofill_passwords }}"
+
 - name: Add apps to login items
   ansible.builtin.command:
     argv:
