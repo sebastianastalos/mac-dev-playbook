@@ -75,6 +75,12 @@ vscode_extensions:
   - vscode-icons-team.vscode-icons
   - wayou.vscode-todo-highlight
 
+# claude-chats – browse and delete Claude Code chat history. Not in Homebrew,
+# so the release binary is fetched directly. Pinned; bump deliberately.
+claude_chats_version: "v0.3.8"
+claude_chats_repo: "https://github.com/ataleckij/claude-chats-delete"
+claude_chats_arch: arm64  # Apple Silicon; use amd64 on Intel
+
 # npm global packages
 npm_global_packages:
   - "@anthropic-ai/claude-code"

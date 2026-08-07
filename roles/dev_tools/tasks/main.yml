@@ -15,6 +15,24 @@
   changed_when: false
   ignore_errors: "{{ ansible_check_mode }}"
 
+- name: Create ~/.local/bin
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.local/bin"
+    state: directory
+    mode: "0755"
+
+# get_url reads the hash out of the release's checksums.txt, matching on the
+# binary's filename, so there is no checksum to hardcode when bumping.
+- name: Install claude-chats
+  ansible.builtin.get_url:
+    url: "{{ _cc_url }}/claude-chats-darwin-{{ claude_chats_arch }}"
+    checksum: "sha256:{{ _cc_url }}/checksums.txt"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.local/bin/claude-chats"
+    mode: "0755"
+  vars:
+    _cc_url: >-
+      {{ claude_chats_repo }}/releases/download/{{ claude_chats_version }}
+
 - name: Configure gh as git credential helper
   ansible.builtin.command: gh auth setup-git
   register: dev_tools_gh_setup_result

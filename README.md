@@ -73,6 +73,9 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - Wipr (Safari content blocker)
 - Colorful Folder (folder icon customiser)
 
+**Other CLI tools:**
+- claude-chats (browse/delete Claude Code chat history, pinned release binary)
+
 **CLI tools (Homebrew):**
 - GitHub CLI (`gh`)
 - dockutil
