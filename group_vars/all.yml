@@ -38,6 +38,8 @@ mas_apps:
     name: "1Password for Safari"
   - id: 1662217862
     name: "Wipr"
+  - id: 1576476152
+    name: "Colorful Folder"
 
 # Homebrew formulae (CLI tools)
 homebrew_formulae:

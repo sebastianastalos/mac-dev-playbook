@@ -71,6 +71,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - Amphetamine
 - 1Password for Safari (Safari extension)
 - Wipr (Safari content blocker)
+- Colorful Folder (folder icon customiser)
 
 **CLI tools (Homebrew):**
 - GitHub CLI (`gh`)
