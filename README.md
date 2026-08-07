@@ -62,6 +62,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - Docker
 - Tailscale
 - cmux
+- Itsycal (menu bar calendar)
 
 **App Store:**
 - Amphetamine

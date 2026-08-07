@@ -19,6 +19,7 @@ homebrew_casks:
   - finetune
   - mos
   - stats
+  - itsycal
   - 1password-cli
   - shottr
   - discord
@@ -129,6 +130,8 @@ login_items:
     path: /Applications/FineTune.app
   - name: Mos
     path: /Applications/Mos.app
+  - name: Itsycal
+    path: /Applications/Itsycal.app
 
 # Dock items (pinned apps in order)
 dock_items:
