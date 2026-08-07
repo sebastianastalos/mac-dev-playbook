@@ -14,7 +14,7 @@ homebrew_casks:
   - docker
   - tailscale
   - font-jetbrains-mono-nerd-font
-  - alfred
+  - raycast
 
   - finetune
   - mos
@@ -119,8 +119,8 @@ macos_autofill_passwords: false
 
 # Apps to open at login
 login_items:
-  - name: Alfred 5
-    path: /Applications/Alfred 5.app
+  - name: Raycast
+    path: /Applications/Raycast.app
   - name: Amphetamine
     path: /Applications/Amphetamine.app
   - name: Stats

@@ -43,7 +43,9 @@ Ansible playbook to automate setting up a fresh Mac for development.
 **After running:**
 - **GitHub CLI** – Run `gh auth login` to authenticate, then `make run` again so the credential helper wires up.
 - **SSH key** – The playbook generates `~/.ssh/id_ed25519`. Copy it to any VMs with `ssh-copy-id user@host`.
-- **Sign into apps** – 1Password, Obsidian, Claude, Alfred.
+- **Sign into apps** – 1Password, Obsidian, Claude.
+- **Raycast** – Set the hotkey (it does not claim ⌘Space automatically) and sign in to sync
+  settings. Raycast config is not managed by this playbook.
 - **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password
   and Wipr in *Safari → Settings → Extensions*. Safari records an `EnabledByUserGesture` flag
   per extension, so a scripted flip is unlikely to be honoured.
@@ -63,6 +65,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - Tailscale
 - cmux
 - Itsycal (menu bar calendar)
+- Raycast (launcher)
 
 **App Store:**
 - Amphetamine
