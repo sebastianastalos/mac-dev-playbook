@@ -46,9 +46,9 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **Sign into apps** – 1Password, Obsidian, Claude.
 - **Raycast** – Set the hotkey (it does not claim ⌘Space automatically) and sign in to sync
   settings. Raycast config is not managed by this playbook.
-- **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password
-  and Wipr in *Safari → Settings → Extensions*. Safari records an `EnabledByUserGesture` flag
-  per extension, so a scripted flip is unlikely to be honoured.
+- **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password,
+  Wipr and Obsidian Web Clipper in *Safari → Settings → Extensions*. Safari records an
+  `EnabledByUserGesture` flag per extension, so a scripted flip is unlikely to be honoured.
 - **1Password SSH agent** – Turn on *Settings → Developer → Use the SSH Agent*. This can't be
   automated: `sshAgent.enabled` in 1Password's `settings.json` is protected by an HMAC in the
   same file's `authTags`, so an out-of-band edit is detectable. The playbook wires `ssh` up to
@@ -72,6 +72,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - 1Password for Safari (Safari extension)
 - Wipr (Safari content blocker)
 - Colorful Folder (folder icon customiser)
+- Obsidian Web Clipper (Safari extension)
 
 **Other CLI tools:**
 - claude-chats (browse/delete Claude Code chat history, pinned release binary)

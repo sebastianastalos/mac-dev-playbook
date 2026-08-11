@@ -40,6 +40,8 @@ mas_apps:
     name: "Wipr"
   - id: 1576476152
     name: "Colorful Folder"
+  - id: 6720708363
+    name: "Obsidian Web Clipper"
 
 # Homebrew formulae (CLI tools)
 homebrew_formulae:
