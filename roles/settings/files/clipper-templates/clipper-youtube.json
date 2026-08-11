@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "YouTube",
+  "behavior": "create",
+  "noteContentFormat": "![{{title}}]({{url}})\n\n## Description\n\n{{schema:@VideoObject:description}}\n\n## Notes\n\n",
+  "properties": [
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "source",
+      "value": "{{url}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "published",
+      "value": "{{published|date:\\\"YYYY-MM-DD\\\"}}",
+      "type": "date"
+    },
+    {
+      "name": "clipped",
+      "value": "{{date|date:\\\"YYYY-MM-DD\\\"}}",
+      "type": "date"
+    },
+    {
+      "name": "channel",
+      "value": "{{schema:@VideoObject:author}}",
+      "type": "text"
+    },
+    {
+      "name": "duration",
+      "value": "{{schema:@VideoObject:duration|duration:\\\"HH:mm:ss\\\"}}",
+      "type": "text"
+    },
+    {
+      "name": "site",
+      "value": "{{site}}",
+      "type": "text"
+    },
+    {
+      "name": "tags",
+      "value": "clipping",
+      "type": "multitext"
+    }
+  ],
+  "triggers": [
+    "https://www.youtube.com/watch"
+  ],
+  "noteNameFormat": "{{schema:@VideoObject:name|safe_name|trim}}",
+  "path": "Clippings/"
+}

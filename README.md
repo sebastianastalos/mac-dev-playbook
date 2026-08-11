@@ -49,6 +49,11 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password,
   Wipr and Obsidian Web Clipper in *Safari → Settings → Extensions*. Safari records an
   `EnabledByUserGesture` flag per extension, so a scripted flip is unlikely to be honoured.
+- **Web Clipper templates** – Import the three templates in
+  `roles/settings/files/clipper-templates/` via the clipper's settings, then drag *Article* to the
+  top so it acts as the fallback (the first template in the list wins when no trigger matches).
+  Set *Vault* on each to `mycelium` – it defaults to "Last used". Clipper settings live in a
+  SQLite store inside Safari's container, so none of this can be deployed by Ansible.
 - **1Password SSH agent** – Turn on *Settings → Developer → Use the SSH Agent*. This can't be
   automated: `sshAgent.enabled` in 1Password's `settings.json` is protected by an HMAC in the
   same file's `authTags`, so an out-of-band edit is detectable. The playbook wires `ssh` up to
