@@ -54,6 +54,11 @@ Ansible playbook to automate setting up a fresh Mac for development.
   top so it acts as the fallback (the first template in the list wins when no trigger matches).
   Set *Vault* on each to `mycelium` – it defaults to "Last used". Clipper settings live in a
   SQLite store inside Safari's container, so none of this can be deployed by Ansible.
+- **macOS AutoFill** – In 1Password (8.12.32+), *Settings → Autofill → Set up macOS AutoFill* →
+  Turn On, until it shows "Active". If the setup card is missing right after an app update, lock
+  and unlock 1Password to refresh it. Then in *System Settings → General → AutoFill & Passwords →
+  "AutoFill from"*, keep **1Password** on and **Passwords** off. The provider rows aren't
+  scriptable, so both steps are manual.
 - **1Password SSH agent** – Turn on *Settings → Developer → Use the SSH Agent*. This can't be
   automated: `sshAgent.enabled` in 1Password's `settings.json` is protected by an HMAC in the
   same file's `authTags`, so an out-of-band edit is detectable. The playbook wires `ssh` up to
@@ -98,7 +103,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 
 - **macOS** – Hidden files, Finder improvements (column view, extensions, status bar), keyboard repeat, screenshots saved to `~/Screenshots`
 - **Safari** – Turns off auto-correct, and turns off contacts autofill so the iCloud "Hide My Email" suggestion stops appearing in email fields
-- **Apple Passwords** – Turns off autofill system-wide, so only 1Password offers logins
+- **AutoFill** – Keeps the system-wide AutoFill switch on for 1Password's native macOS AutoFill; provider selection is a manual step (below)
 - **Git** – User identity, default branch (`main`), `pull.rebase`, global `.gitignore`
 - **Dock** – Pins apps in order: Obsidian, VS Code, Claude, 1Password, cmux
 - **SSH** – Generates an `ed25519` keypair if one doesn't exist, and points `ssh` at the 1Password SSH agent via `IdentityAgent` in `~/.ssh/config` plus `SSH_AUTH_SOCK` in `~/.zshrc`

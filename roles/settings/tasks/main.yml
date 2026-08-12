@@ -261,10 +261,11 @@
     type: bool
     value: "{{ safari_autofill_from_contacts }}"
 
-# Despite the Safari domain, this backs the system-wide "AutoFill Passwords and
-# Passkeys" switch in System Settings > General > AutoFill & Passwords.
-# Verified on macOS 26.6: flipping this key moves that toggle.
-- name: Disable Apple Passwords autofill system-wide
+# Despite the Safari domain, this backs the system-wide AutoFill switch in
+# System Settings > General > AutoFill & Passwords. Must be on for providers
+# in the "AutoFill from" list (1Password) to fill; the per-provider rows
+# aren't scriptable.
+- name: Enable system-wide AutoFill
   community.general.osx_defaults:
     domain: com.apple.Safari
     key: AutoFillPasswords

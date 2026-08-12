@@ -123,9 +123,11 @@ safari_autocorrect: false
 # Off also hides the iCloud "Hide My Email" suggestion in email fields
 safari_autofill_from_contacts: false
 
-# Apple Passwords autofill, system-wide (settings role notes the domain quirk).
-# Off so it doesn't crowd out 1Password, prompt to save, or offer Hide My Email.
-macos_autofill_passwords: false
+# System-wide AutoFill switch (settings role notes the domain quirk). On since
+# 1Password ships native macOS AutoFill (GA in 8.12.32, Aug 2026) as a
+# credential provider. Setup and the "AutoFill from" provider rows (Passwords
+# off, 1Password on) are manual – see README.
+macos_autofill_passwords: true
 
 # Apps to open at login
 login_items:
