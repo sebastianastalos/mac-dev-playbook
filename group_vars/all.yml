@@ -130,6 +130,9 @@ safari_autofill_from_contacts: false
 # off, 1Password on) are manual – see README.
 macos_autofill_passwords: true
 
+# Bloom file manager (see settings role for the default-viewer caveat)
+bloom_bundle_id: com.asiafu.Bloom
+
 # Apps to open at login
 login_items:
   - name: Raycast
