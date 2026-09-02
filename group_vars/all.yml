@@ -20,6 +20,7 @@ homebrew_casks:
   - mos
   - stats
   - itsycal
+  - bloom
   - 1password-cli
   - shottr
   - discord
@@ -133,6 +134,8 @@ macos_autofill_passwords: true
 login_items:
   - name: Raycast
     path: /Applications/Raycast.app
+  - name: Bloom
+    path: /Applications/Bloom.app
   - name: Amphetamine
     path: /Applications/Amphetamine.app
   - name: Stats
@@ -147,6 +150,8 @@ login_items:
 
 # Dock items (pinned apps in order)
 dock_items:
+  - name: Bloom
+    path: /Applications/Bloom.app
   - name: Calendar
     path: /System/Applications/Calendar.app
   - name: System Settings

@@ -44,6 +44,10 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **GitHub CLI** – Run `gh auth login` to authenticate, then `make run` again so the credential helper wires up.
 - **SSH key** – The playbook generates `~/.ssh/id_ed25519`. Copy it to any VMs with `ssh-copy-id user@host`.
 - **Sign into apps** – 1Password, Obsidian, Claude.
+- **Bloom licence** – Enter the licence key (stored in 1Password) in Bloom's settings. The key is
+  deliberately not in this repo. Bloom cannot be made the default file manager: LaunchServices
+  reserves `public.folder` for Finder, so `duti -s` fails with error -50. It is pinned to the Dock
+  and set to launch at login instead; its global hotkey is Cmd-Shift-Return.
 - **Raycast** – Set the hotkey (it does not claim ⌘Space automatically) and sign in to sync
   settings. Raycast config is not managed by this playbook.
 - **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password,
@@ -76,6 +80,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - cmux
 - Itsycal (menu bar calendar)
 - Raycast (launcher)
+- Bloom (file manager)
 
 **App Store:**
 - Amphetamine
