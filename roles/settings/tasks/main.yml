@@ -272,36 +272,16 @@
     type: bool
     value: "{{ macos_autofill_passwords }}"
 
-# LSSetDefaultRoleHandlerForContentType refuses public.folder (-50), so Bloom's
-# documented route is used instead: NSFileViewer plus a direct LSHandlers entry.
-# Needs a restart to take effect. https://bloomapp.club/user-guide
+# NSFileViewer is honoured by some apps for "reveal in file viewer". It does NOT
+# change what opens folders: LSSetDefaultRoleHandlerForContentType refuses
+# public.folder (-50), and a hand-written LSHandlers entry is discarded by
+# LaunchServices at boot (verified on macOS 26.6). Finder keeps folders.
 - name: Set Bloom as the default file viewer
   community.general.osx_defaults:
     domain: NSGlobalDomain
     key: NSFileViewer
     type: string
     value: "{{ bloom_bundle_id }}"
-
-- name: Read current LaunchServices handlers
-  ansible.builtin.command:
-    argv:
-      - plutil
-      - -p
-      - "{{ ansible_facts['env']['HOME'] }}/Library/Preferences/\
-        com.apple.LaunchServices/com.apple.launchservices.secure.plist"
-  register: settings_lshandlers
-  changed_when: false
-  failed_when: false
-
-- name: Register Bloom as the folder handler
-  ansible.builtin.shell:
-    cmd: |
-      defaults write com.apple.LaunchServices/com.apple.launchservices.secure \
-        LSHandlers -array-add \
-        '{LSHandlerContentType="public.folder";
-      LSHandlerRoleAll="{{ bloom_bundle_id }}";}'
-  when: bloom_bundle_id not in (settings_lshandlers.stdout | default(''))
-  changed_when: true
 
 - name: Add apps to login items
   ansible.builtin.command:

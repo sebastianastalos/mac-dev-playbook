@@ -46,14 +46,13 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **Sign into apps** – 1Password, Obsidian, Claude.
 - **Bloom licence** – Enter the licence key (stored in 1Password) in Bloom's settings. The key is
   deliberately not in this repo.
-- **Bloom restart** – The playbook sets Bloom as the default file viewer (`NSFileViewer` plus an
-  `LSHandlers` entry for `public.folder`, per <https://bloomapp.club/user-guide>). This needs a
-  restart to take effect. Note `LSSetDefaultRoleHandlerForContentType` refuses `public.folder`
-  with -50, which is why `duti` cannot do it and the defaults route is used instead.
-- **Bloom Dock click** – To open Bloom by clicking the Finder Dock icon you need a third-party
-  helper (Click2Minimize or Supercharge); Bloom cannot claim the Dock icon itself. Optionally
-  enable *Intercept Command-Click Events from Dock* in Bloom, which needs Accessibility
-  permission. Bloom's global hotkey is Cmd-Shift-Return.
+- **Bloom is not the default file manager** – macOS will not allow it, verified two ways on 26.6:
+  `LSSetDefaultRoleHandlerForContentType("public.folder", ...)` returns -50, and a hand-written
+  `LSHandlers` entry is discarded by LaunchServices at boot. `open <dir>` still goes to Finder.
+  The playbook sets `NSFileViewer` to Bloom, which only affects apps that honour that key for
+  "reveal in file viewer". To open Bloom from the Finder Dock icon you need a third-party helper
+  (Click2Minimize or Supercharge). Bloom's global hotkey is Cmd-Shift-Return; its
+  *Intercept Command-Click Events from Dock* option needs Accessibility permission.
 - **Raycast** – Set the hotkey (it does not claim ⌘Space automatically) and sign in to sync
   settings. Raycast config is not managed by this playbook.
 - **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password,
