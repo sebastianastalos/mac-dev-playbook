@@ -45,9 +45,13 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **SSH key** – The playbook generates `~/.ssh/id_ed25519`. Copy it to any VMs with `ssh-copy-id user@host`.
 - **Sign into apps** – 1Password, Obsidian, Claude.
 - **Bloom licence** – Enter the licence key (stored in 1Password) in Bloom's settings. The key is
-  deliberately not in this repo. Bloom cannot be made the default file manager: LaunchServices
-  reserves `public.folder` for Finder, so `duti -s` fails with error -50. It is pinned to the Dock
-  and set to launch at login instead; its global hotkey is Cmd-Shift-Return.
+  deliberately not in this repo.
+- **Bloom as default file manager** – Cannot be scripted:
+  `LSSetDefaultRoleHandlerForContentType("public.folder", ...)` returns -50, so `duti` and the
+  API both fail. Do it through Finder instead: select any folder, Cmd-I, *Open with* -> Bloom,
+  then *Change All*. Bloom's *Click Finder icon to open Bloom* option only works once that is
+  set. Also enable *Intercept Command-Click Events from Dock* (`BloomHijackDockEvent`), which
+  needs Accessibility permission granted to Bloom. Bloom's global hotkey is Cmd-Shift-Return.
 - **Raycast** – Set the hotkey (it does not claim ⌘Space automatically) and sign in to sync
   settings. Raycast config is not managed by this playbook.
 - **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password,
