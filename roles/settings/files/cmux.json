@@ -4,11 +4,12 @@
 
   "app": {
     "appearance": "system",
-    "confirmQuit": "whenMultiple",
+    "confirmQuit": "never",
     "hideTabCloseButton": true,
     "warnBeforeClosingTab": false,
     "newWorkspacePlacement": "afterCurrent",
-    "windowTitleTemplate": "{activeWorkspace} – {activeDirectory}"
+    "windowTitleTemplate": "{activeWorkspace} – {activeDirectory}",
+    "reorderOnNotification": false
   },
 
   "terminal": {
