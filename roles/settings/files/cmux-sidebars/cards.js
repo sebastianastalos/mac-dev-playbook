@@ -52,6 +52,19 @@ function subagents(w) {
 const PR_COLORS = { open: C.green, merged: "#b48ead", closed: C.red };
 const prColor = (w) => (!w.pr ? "clear" : w.pr.stale ? C.dim : PR_COLORS[w.pr.status] ?? C.dim);
 
+function details(w) {
+  const parts = [];
+  if (w.branch) parts.push(`⎇ ${w.branch}${w.dirty ? "*" : ""}`);
+  if (w.tabCount > 1) parts.push(`${w.tabCount} tabs`);
+  const agents = (w.agents ?? []).filter((a) => a.status !== "ended").length;
+  if (agents > 1) parts.push(`${agents} agents`);
+  if (w.portCount) parts.push((w.ports ?? []).slice(0, 3).map((p) => `:${p}`).join(" "));
+  if (w.progress) parts.push(`${Math.round((w.progress.value ?? 0) * 100)}%${w.progress.label ? " " + w.progress.label : ""}`);
+  return parts.join(" · ");
+}
+
+const note = (w) => (w.description ?? "").replace(/\s+/g, " ").trim();
+
 const folder = (w) => (w.directory ?? "").replace(/^\/Users\/[^/]+/, "~");
 
 function line(text, color) {
@@ -79,9 +92,6 @@ sidebar(() =>
       },
       (w) =>
         HStack({ spacing: 0 }, [
-          Rectangle()
-            .fill(() => (w().selected ? C.rail : "clear"))
-            .frame({ width: 3 }),
           VStack({ spacing: 3 }, [
             HStack({ spacing: 7 }, [
               Circle({ size: 7 }).fill(() => state(w()).color),
@@ -102,6 +112,8 @@ sidebar(() =>
               line(() => activity(w()), () => state(w()).label ? state(w()).color : C.dim),
               Text(() => subagents(w())).font("caption").color(C.orange).layoutPriority(2).fixedSize(),
             ]),
+            line(() => note(w()), C.text),
+            line(() => details(w()), C.dim),
             line(() => folder(w()), C.dim),
           ])
             .padding(9),
