@@ -119,7 +119,7 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **SSH** – Generates an `ed25519` keypair if one doesn't exist, and points `ssh` at the 1Password SSH agent via `IdentityAgent` in `~/.ssh/config` plus `SSH_AUTH_SOCK` in `~/.zshrc`
 - **Shell** – Adds aliases to `~/.zshrc` for git and Docker workflows (see [ALIASES.md](docs/ALIASES.md))
 - **Claude Code** – Two-line status line (limit bars, context, cost, model, branch) and the `glow` mod (colour-coded tool rows, pixel mascot), merged into `~/.claude/settings.json`
-- **cmux** – Deploys `~/.config/cmux/cmux.json` with appearance and notification settings
+- **cmux** – Deploys `~/.config/cmux/cmux.json` with appearance and notification settings (frosted grey sidebar), plus a card-style custom sidebar (`cards.js`: agent activity, folder, PR badge, subagent dots)
 - **Ghostty** – Configures font (JetBrainsMono Nerd Font), background blur, and tab bar
 
 ## Customisation

@@ -30,7 +30,9 @@
   },
 
   "sidebarAppearance": {
-    "matchTerminalBackground": true
+    "matchTerminalBackground": false,
+    "darkModeTintColor": "#2a2a2e",
+    "tintOpacity": 0.12
   },
 
   "sidebar": {

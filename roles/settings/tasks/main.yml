@@ -11,6 +11,25 @@
     dest: "{{ ansible_facts['env']['HOME'] }}/.config/cmux/cmux.json"
     mode: "0644"
 
+- name: Create cmux custom sidebars directory
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.config/cmux/sidebars"
+    state: directory
+    mode: "0755"
+
+- name: Deploy cmux card sidebar
+  ansible.builtin.copy:
+    src: cmux-sidebars/cards.js
+    dest: "{{ ansible_facts['env']['HOME'] }}/.config/cmux/sidebars/cards.js"
+    mode: "0644"
+
+- name: Use the card sidebar in cmux
+  community.general.osx_defaults:
+    domain: com.cmuxterm.app
+    key: cmuxExtensionSidebarProviderId
+    type: string
+    value: cmux.sidebar.custom.cards
+
 - name: Create Ghostty config directory
   ansible.builtin.file:
     path: "{{ ansible_facts['env']['HOME'] }}/.config/ghostty"
