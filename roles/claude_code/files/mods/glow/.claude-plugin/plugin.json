@@ -1,0 +1,1 @@
+{ "name": "glow", "version": "0.1.0", "description": "Colour-coded tool rows and a pixel mascot that acts out what Claude is doing", "types": "./types/index.d.ts" }

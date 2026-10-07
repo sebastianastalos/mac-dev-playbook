@@ -24,5 +24,6 @@
     - appstore
     - dev_tools
     - agent_skills
+    - claude_code
     - settings
     - dock

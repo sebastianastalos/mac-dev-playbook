@@ -1,0 +1,50 @@
+---
+# Status line script and local mods. settings.json is merged, not replaced,
+# so Claude Code's own keys (model, plugins, theme) are kept.
+
+- name: Create Claude Code mods directory
+  ansible.builtin.file:
+    path: "{{ ansible_facts['env']['HOME'] }}/.claude/mods"
+    state: directory
+    mode: "0755"
+
+- name: Deploy Claude Code mods
+  ansible.builtin.copy:
+    src: mods/
+    dest: "{{ ansible_facts['env']['HOME'] }}/.claude/mods/"
+    mode: "0644"
+    directory_mode: "0755"
+
+- name: Deploy Claude Code status line script
+  ansible.builtin.copy:
+    src: statusline.py
+    dest: "{{ ansible_facts['env']['HOME'] }}/.claude/statusline.py"
+    mode: "0755"
+
+- name: Read Claude Code settings
+  ansible.builtin.slurp:
+    src: "{{ ansible_facts['env']['HOME'] }}/.claude/settings.json"
+  register: claude_code_settings_file
+  failed_when: false
+
+- name: Merge status line and mods into Claude Code settings
+  ansible.builtin.copy:
+    content: "{{ _merged | to_nice_json(indent=2, sort_keys=false) }}\n"
+    dest: "{{ ansible_facts['env']['HOME'] }}/.claude/settings.json"
+    mode: "0644"
+  vars:
+    _current: >-
+      {{ (claude_code_settings_file.content | b64decode | from_json)
+         if claude_code_settings_file.content is defined else {} }}
+    _merged: >-
+      {{ _current | combine({
+           'statusLine': {
+             'type': 'command',
+             'command': 'python3 -I -S ~/.claude/statusline.py',
+             'padding': 0
+           },
+           'env': {
+             'CLAUDE_CODE_PLUGIN_DIRS': claude_code_mods
+               | map('regex_replace', '^', '~/.claude/mods/') | join(':')
+           }
+         }, recursive=true) }}
