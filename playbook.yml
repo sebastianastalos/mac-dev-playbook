@@ -25,6 +25,6 @@
     - dev_tools
     - agent_skills
     - claude_code
-    - tickets
+    - kanban_board
     - settings
     - dock

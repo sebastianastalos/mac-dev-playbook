@@ -1,0 +1,26 @@
+---
+# The kanban board lives in its own private repo (sebastianastalos/kanban-board):
+# tk/t, the web board, Raycast commands, launchd jobs and the conductor skill.
+# Cloned with the personal account's token, then its install.sh does the rest.
+
+- name: Clone or update the kanban board
+  ansible.builtin.shell: |
+    set -euo pipefail
+    helper='!f() { echo username=x-access-token; echo "password=$(gh auth token --user sebastianastalos)"; }; f'
+    if [ -d "{{ kanban_board_dir }}/.git" ]; then
+      before=$(git -C "{{ kanban_board_dir }}" rev-parse HEAD)
+      git -C "{{ kanban_board_dir }}" -c credential.helper= -c credential.helper="$helper" pull -q --ff-only
+      [ "$before" = "$(git -C "{{ kanban_board_dir }}" rev-parse HEAD)" ] && echo unchanged || echo updated
+    else
+      git -c credential.helper= -c credential.helper="$helper" clone -q https://github.com/sebastianastalos/kanban-board.git "{{ kanban_board_dir }}"
+      echo cloned
+    fi
+  args:
+    executable: /bin/bash
+  register: kanban_board_repo
+  changed_when: kanban_board_repo.stdout != "unchanged"
+
+- name: Install the kanban board
+  ansible.builtin.command: "{{ kanban_board_dir }}/install.sh"
+  register: kanban_board_install
+  changed_when: "'installed' in kanban_board_install.stdout or 'added' in kanban_board_install.stdout or kanban_board_repo.changed"
