@@ -681,6 +681,8 @@ $("#addlink").onclick=async()=>{const url=$("#linkurl").value.trim();if(!url)ret
   if(!editing.id){pending.links.push({url:/^[a-z]+:/i.test(url)?url:"https://"+url,label:$("#linklabel").value.trim()});$("#linkurl").value="";$("#linklabel").value="";renderAtt(editing);return}
   try{await api("POST",`/api/tickets/${editing.id}/links`,{url:/^[a-z]+:/i.test(url)?url:"https://"+url,label:$("#linklabel").value.trim()})}catch(err){alertLine(err.message);return}
   $("#linkurl").value="";$("#linklabel").value="";refreshEditing()};
+$("#linkurl").addEventListener("paste",e=>{const txt=(e.clipboardData?.getData("text")||"").trim();
+  if(/^(https?:\/\/|mailto:|slack:|obsidian:)\S+$/i.test(txt)){e.preventDefault();$("#linkurl").value=txt;$("#addlink").click()}});
 $("#linkurl").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#addlink").click()}});
 $("#att").addEventListener("click",e=>{const p=e.target.closest("[data-pend]");if(!p)return;const k=p.dataset.pend[0],i=+p.dataset.pend.slice(1);
   (k==="f"?pending.files:pending.links).splice(i,1);renderAtt(editing)});
@@ -694,7 +696,11 @@ rvDlg.addEventListener("close",async()=>{const t=reviewing;reviewing=null;if(!t)
   load()});
 document.addEventListener("click",e=>{const c=e.target.closest(".card");if(!c||e.target.closest("a,button"))return;
   const t=tickets.find(x=>x.id==c.dataset.id);if(t.status==="review"||(t.status==="done"&&t.review)){openReview(t);return}openEdit(t)});
+function typedLink(){const url=$("#linkurl").value.trim();if(!url)return null;
+  const l={url:/^[a-z]+:/i.test(url)?url:"https://"+url,label:$("#linklabel").value.trim()};$("#linkurl").value="";$("#linklabel").value="";return l}
 dlg.addEventListener("close",async()=>{const t=editing;editing=null;if(!t)return;
+  const left=dlg.returnValue==="save"?typedLink():null;
+  if(left){if(t.id)await api("POST",`/api/tickets/${t.id}/links`,left).catch(()=>{});else pending.links.push(left)}
   if(dlg.returnValue==="delete"){await api("DELETE","/api/tickets/"+t.id)}
   else if(dlg.returnValue==="save"&&!t.id){const d=Object.fromEntries(new FormData(form));d.priority=+d.priority;
     if(!d.due){delete d.due;d.quick=true}
