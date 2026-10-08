@@ -125,7 +125,7 @@ def spawn(a):
     t = tk("show", str(a.ticket))
     if t["workspace_id"] and any(w["id"] == t["workspace_id"] for w in workspaces()):
         sys.exit(f"#{t['id']} already has a live workspace")
-    active = [x for x in tk("ls") if x["status"] in ACTIVE and x["workspace_id"]]
+    active = [x for x in tk("ls", "-b", "agents") if x["status"] in ACTIVE and x["workspace_id"]]
     if len(active) >= MAX_ACTIVE and not a.force:
         sys.exit(f"{len(active)} workers already active (max {MAX_ACTIVE}); finish one or pass --force")
 
@@ -144,7 +144,7 @@ def spawn(a):
         mode, worktree = "dir", Path(a.dir).expanduser().resolve()
         if not worktree.is_dir():
             sys.exit(f"{worktree} is not a folder")
-        busy = [x for x in tk("ls") if x["id"] != t["id"] and x["status"] in ACTIVE and x["worktree"] == str(worktree)]
+        busy = [x for x in tk("ls", "-b", "agents") if x["id"] != t["id"] and x["status"] in ACTIVE and x["worktree"] == str(worktree)]
         if busy:
             sys.exit(f"#{busy[0]['id']} is already working in {worktree}; one worker per folder without git")
     else:
@@ -187,7 +187,7 @@ def spawn(a):
 def status(a):
     live = {w["id"]: w for w in workspaces()}
     rows = []
-    for t in tk("ls"):
+    for t in tk("ls", "-b", "agents"):
         if not t["workspace_id"] and t["status"] not in ACTIVE + ("review",):
             continue
         ws = live.get(t["workspace_id"])
@@ -210,7 +210,7 @@ def status(a):
 
 
 def snapshot():
-    return {t["id"]: (t["status"], t.get("decision")) for t in tk("ls")
+    return {t["id"]: (t["status"], t.get("decision")) for t in tk("ls", "-b", "agents")
             if t["workspace_id"] or t["status"] == "review"}
 
 

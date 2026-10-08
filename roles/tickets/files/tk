@@ -12,10 +12,15 @@ DB_PATH = Path(os.environ.get("TK_DB", Path.home() / ".local/share/tickets/ticke
 SHOTS = DB_PATH.parent / "shots"
 IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 PORT = int(os.environ.get("TK_PORT", "7717"))
-STATUSES = ["backlog", "todo", "working", "needs-you", "review", "done"]
+STATUSES = ["backlog", "todo", "working", "needs-you", "waiting", "review", "done"]
+BOARDS = ["agents", "tasks"]
 # cmux lane → board column; lanes not listed leave the ticket alone
 LANES = {"working": "working", "needs-attention": "needs-you", "review": "review", "done": "done"}
-FIELDS = ["title", "body", "project", "status", "priority", "workspace_id", "worktree", "branch", "pr_url"]
+FIELDS = ["title", "body", "project", "status", "priority", "workspace_id", "worktree", "branch", "pr_url",
+          "board", "due", "waiting_on"]
+FILES = DB_PATH.parent / "files"
+INLINE_TYPES = {**{".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+                   ".gif": "image/gif"}, ".pdf": "application/pdf"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
@@ -29,6 +34,14 @@ CREATE TABLE IF NOT EXISTS tickets (
   status_source TEXT NOT NULL DEFAULT 'manual',
   last_lane TEXT,
   created_at REAL NOT NULL, updated_at REAL NOT NULL, closed_at REAL
+);
+CREATE TABLE IF NOT EXISTS attachments (
+  id INTEGER PRIMARY KEY,
+  ticket_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,          -- link | file
+  target TEXT NOT NULL,        -- URL, or the stored file name
+  label TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS shots (
   id INTEGER PRIMARY KEY,
@@ -49,7 +62,8 @@ def db():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
     have = {r[1] for r in conn.execute("PRAGMA table_info(tickets)")}
-    for col, kind in (("decision", "TEXT"), ("decision_note", "TEXT"), ("decided_at", "REAL"), ("review", "TEXT")):
+    for col, kind in (("decision", "TEXT"), ("decision_note", "TEXT"), ("decided_at", "REAL"), ("review", "TEXT"), ("status_since", "REAL"),
+                      ("board", "TEXT NOT NULL DEFAULT 'agents'"), ("due", "TEXT"), ("waiting_on", "TEXT")):
         if col not in have:
             conn.execute(f"ALTER TABLE tickets ADD COLUMN {col} {kind}")
     return conn
@@ -63,8 +77,10 @@ def get(conn, tid):
     return row(conn.execute("SELECT * FROM tickets WHERE id = ?", (tid,)).fetchone())
 
 
-def list_tickets(conn, project=None, status=None, include_done=False):
+def list_tickets(conn, project=None, status=None, include_done=False, board=None):
     sql, args = "SELECT * FROM tickets WHERE 1=1", []
+    if board:
+        sql += " AND board = ?"; args.append(board)
     if project:
         sql += " AND project = ?"; args.append(project)
     if status:
@@ -77,19 +93,32 @@ def list_tickets(conn, project=None, status=None, include_done=False):
     shots = {}
     for sh in conn.execute("SELECT ticket_id, file, caption FROM shots ORDER BY id"):
         shots.setdefault(sh["ticket_id"], []).append({"url": f"/shots/{sh['ticket_id']}/{sh['file']}", "caption": sh["caption"]})
+    files = {}
+    for at in conn.execute("SELECT * FROM attachments ORDER BY id"):
+        files.setdefault(at["ticket_id"], []).append(attachment_json(at))
     for t in tickets:
         t["shots"] = shots.get(t["id"], [])
+        t["attachments"] = files.get(t["id"], [])
     return tickets
 
 
-def create(conn, title, project="", body="", status="backlog", priority=2):
+def attachment_json(at):
+    url = at["target"] if at["kind"] == "link" else f"/files/{at['ticket_id']}/{at['target']}"
+    return {"id": at["id"], "kind": at["kind"], "url": url, "label": at["label"] or at["target"],
+            "image": at["kind"] == "file" and Path(at["target"]).suffix in IMAGE_TYPES}
+
+
+def create(conn, title, project="", body="", status="backlog", priority=2, board="agents", due=None, waiting_on=None):
     if status not in STATUSES:
         raise ValueError(f"unknown status {status!r}")
+    if board not in BOARDS:
+        raise ValueError(f"unknown board {board!r}")
     now = time.time()
     cur = conn.execute(
-        "INSERT INTO tickets (title, body, project, status, priority, created_at, updated_at, closed_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (title.strip(), body, project, status, int(priority), now, now, now if status == "done" else None),
+        "INSERT INTO tickets (title, body, project, status, priority, created_at, updated_at, closed_at, status_since,"
+        " board, due, waiting_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (title.strip(), body, project, status, int(priority), now, now, now if status == "done" else None, now,
+         board, parse_due(due) if due else None, waiting_on or None),
     )
     conn.commit()
     return get(conn, cur.lastrowid)
@@ -101,13 +130,19 @@ def update(conn, tid, source="manual", **changes):
         raise KeyError(tid)
     internal = {k: changes.pop(k) for k in ("decision", "decision_note", "decided_at", "review") if k in changes}
     changes = {k: v for k, v in changes.items() if k in FIELDS and v is not None}
-    for k in ("workspace_id", "worktree", "branch", "pr_url"):
+    for k in ("workspace_id", "worktree", "branch", "pr_url", "due", "waiting_on"):
         if changes.get(k) == "":
-            changes[k] = None  # clearing a link
+            changes[k] = None  # clearing a field
+    if changes.get("due"):
+        changes["due"] = parse_due(changes["due"])
+    if "board" in changes and changes["board"] not in BOARDS:
+        raise ValueError(f"unknown board {changes['board']!r}")
     if "status" in changes:
         if changes["status"] not in STATUSES:
             raise ValueError(f"unknown status {changes['status']!r}")
         changes["status_source"] = source
+        if changes["status"] != t["status"]:
+            changes["status_since"] = time.time()
         changes["closed_at"] = time.time() if changes["status"] == "done" else None
         if changes["status"] in ("backlog", "todo", "working", "needs-you"):
             # back to work: the review decision belonged to the round that ended
@@ -138,6 +173,87 @@ def decide(conn, tid, decision, note=""):
                   decided_at=time.time() if decision else None)
 
 
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def parse_due(text, today=None):
+    """today, tomorrow/tmr, mon..sun (next one), +3d, 2026-10-15, 15/10 or 15/10/2026 → ISO date."""
+    import datetime as dt
+    today = today or dt.date.today()
+    s = str(text).strip().lower()
+    if s in ("today", "tod"):
+        d = today
+    elif s in ("tomorrow", "tmr", "tom"):
+        d = today + dt.timedelta(days=1)
+    elif s in WEEKDAYS or s in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "tues", "thur", "thurs"):
+        ahead = (WEEKDAYS.index(s[:3]) - today.weekday()) % 7 or 7
+        d = today + dt.timedelta(days=ahead)
+    elif re.fullmatch(r"\+\d+d", s):
+        d = today + dt.timedelta(days=int(s[1:-1]))
+    elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+        d = dt.date.fromisoformat(s)
+    elif m := re.fullmatch(r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", s):
+        year = int(m[3]) + (2000 if m[3] and len(m[3]) == 2 else 0) if m[3] else today.year
+        d = dt.date(year, int(m[2]), int(m[1]))
+        if not m[3] and d < today:
+            d = d.replace(year=year + 1)
+    else:
+        raise ValueError(f"can't read {text!r} as a date (try today, fri, +3d, 15/10)")
+    return d.isoformat()
+
+
+def split_due(words):
+    """'Order phone for Jess fri' → ('Order phone for Jess', '2026-10-09'); no trailing date → (text, None)."""
+    parts = words.strip().split()
+    if len(parts) > 1:
+        try:
+            return " ".join(parts[:-1]), parse_due(parts[-1])
+        except ValueError:
+            pass
+    return words.strip(), None
+
+
+def add_link(conn, tid, url, label=""):
+    if not get(conn, tid):
+        raise KeyError(tid)
+    if not re.match(r"^(https?|mailto|file|slack|obsidian):", url or ""):
+        raise ValueError("links must start with http(s):, mailto:, file:, slack: or obsidian:")
+    cur = conn.execute("INSERT INTO attachments (ticket_id, kind, target, label, created_at) VALUES (?, 'link', ?, ?, ?)",
+                       (tid, url, label, time.time()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def add_file(conn, tid, name, data, label=""):
+    if not get(conn, tid):
+        raise KeyError(tid)
+    if len(data) > 25 * 1024 * 1024:
+        raise ValueError("files are limited to 25 MB")
+    stem, suffix = Path(name).stem, Path(name).suffix.lower()
+    safe = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:50] or "file"
+    suffix = suffix if re.fullmatch(r"\.[a-z0-9]{1,8}", suffix) else ""
+    folder = FILES / str(tid)
+    folder.mkdir(parents=True, exist_ok=True)
+    stored, n = f"{safe}{suffix}", 1
+    while (folder / stored).exists():
+        n += 1; stored = f"{safe}-{n}{suffix}"
+    (folder / stored).write_bytes(data)
+    cur = conn.execute("INSERT INTO attachments (ticket_id, kind, target, label, created_at) VALUES (?, 'file', ?, ?, ?)",
+                       (tid, stored, label or Path(name).name, time.time()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def remove_attachment(conn, aid):
+    at = conn.execute("SELECT * FROM attachments WHERE id = ?", (aid,)).fetchone()
+    if not at:
+        raise KeyError(aid)
+    if at["kind"] == "file":
+        (FILES / str(at["ticket_id"]) / at["target"]).unlink(missing_ok=True)
+    conn.execute("DELETE FROM attachments WHERE id = ?", (aid,))
+    conn.commit()
+
+
 def add_shot(conn, tid, src, caption=""):
     if not get(conn, tid):
         raise KeyError(tid)
@@ -163,6 +279,8 @@ def clear_shots(conn, tid):
 
 def delete(conn, tid):
     clear_shots(conn, tid)
+    conn.execute("DELETE FROM attachments WHERE ticket_id = ?", (tid,))
+    shutil.rmtree(FILES / str(tid), ignore_errors=True)
     conn.execute("DELETE FROM tickets WHERE id = ?", (tid,))
     conn.commit()
 
@@ -218,6 +336,37 @@ def sync(conn):
     return moved
 
 
+# --- diff size ----------------------------------------------------------------
+
+_diff_cache = {}
+
+
+def diff_stat(worktree):
+    """(+added, -removed) of a worktree against where its branch left the base, uncommitted work included."""
+    hit = _diff_cache.get(worktree)
+    if hit and time.time() - hit[0] < 20:
+        return hit[1]
+    stat = None
+    try:
+        def git(*a):
+            return subprocess.run(["git", "-C", worktree, *a], capture_output=True, text=True, timeout=5)
+        base = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout.strip()
+        if not base:
+            base = next((b for b in ("main", "master") if git("rev-parse", "--verify", "--quiet", b).returncode == 0), "")
+        fork = git("merge-base", "HEAD", base).stdout.strip() if base else ""
+        out = git("diff", "--numstat", fork).stdout if fork else ""
+        added = removed = 0
+        for line in out.splitlines():
+            a, r, _ = (line.split("\t") + ["", ""])[:3]
+            added += int(a) if a.isdigit() else 0
+            removed += int(r) if r.isdigit() else 0
+        stat = {"added": added, "removed": removed} if fork else None
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    _diff_cache[worktree] = (time.time(), stat)
+    return stat
+
+
 # --- helpers ---------------------------------------------------------------------
 
 def current_project():
@@ -243,9 +392,10 @@ def print_tickets(tickets):
             continue
         print(f"\n{status.upper()} ({len(group)})")
         for t in group:
-            extra = " · ".join(x for x in [t["project"], t["branch"] and f"⎇ {t['branch']}", t["pr_url"] and "PR"] if x)
+            extra = " · ".join(x for x in [t["project"], t["due"] and f"due {t['due']}", t.get("waiting_on") and f"waiting on {t['waiting_on']}",
+                                          t["branch"] and f"⎇ {t['branch']}", t["pr_url"] and "PR"] if x)
             mark = {"approved": " ✓ approved", "changes": " ↩ sent back"}.get(t["decision"], "")
-            print(f"  #{t['id']:<4} {'!' * (4 - t['priority'])} {t['title']}{mark}  [{extra}] {ago(t['updated_at'])}")
+            print(f"  #{t['id']:<4} {'!' * (4 - t['priority'])} {t['title']}{mark}  {f'[{extra}] ' if extra else ''}{ago(t['updated_at'])}")
 
 
 # --- web board -------------------------------------------------------------------
@@ -268,7 +418,20 @@ main{display:grid;grid-template-columns:repeat(6,minmax(200px,1fr));gap:10px;pad
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
 .card{background:var(--card);border:1px solid var(--edge);border-radius:8px;padding:8px 9px;cursor:grab}.card:hover{background:var(--cardHover)}
 .card .t{font-weight:600}.card .m{color:var(--dim);font-size:11.5px;margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.chip{border:1px solid var(--edge);border-radius:5px;padding:0 5px}.p1{color:var(--red)}.p3{opacity:.7}
+.chip{border:1px solid var(--edge);border-radius:5px;padding:0 5px}.add-n{color:var(--green)}
+.views{display:flex;border:1px solid var(--edge);border-radius:8px;overflow:hidden}.views button{border:0;border-radius:0;background:transparent;padding:5px 12px;color:var(--dim)}
+.views button.on{background:var(--card);color:var(--text);font-weight:600}
+.due{color:var(--dim)}.due.soon{color:var(--amber)}.due.late{color:var(--red);font-weight:600}.wait-on{color:var(--amber)}
+.att{display:flex;flex-direction:column;gap:6px}.att-item{display:flex;align-items:center;gap:8px;border:1px solid var(--edge);border-radius:7px;padding:5px 8px}
+.att-item img{height:40px;border-radius:4px;display:block}.att-name{color:var(--text);text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att-item .x{border:0;background:transparent;color:var(--dim);font-size:16px;padding:0 4px}.att-item .x:hover{color:var(--red)}
+.drop{border:1px dashed var(--edge);border-radius:8px;padding:10px;text-align:center;color:var(--dim);font-size:12px;margin-top:6px}.drop.over{border-color:var(--green);color:var(--green)}
+.pick{display:inline;color:var(--blue);cursor:pointer;margin:0;font-size:12px}.linkrow{margin-top:6px}.linkrow input{flex:2}.linkrow button{flex:0 0 auto}
+.task-only{display:none}#form.is-task .task-only{display:flex}#form.is-task .agent-only{display:none}.del-n{color:var(--red)}
+.live{font-weight:600}.live.w{color:var(--orange)}.live.n{color:var(--amber)}
+.pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);margin-right:4px;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.7)}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}.p1{color:var(--red)}.p3{opacity:.7}
 .card a{color:var(--green);text-decoration:none}
 .acts{display:flex;gap:6px;margin-top:8px}.acts button{padding:3px 9px;font-size:12px}.approve{color:var(--green);border-color:#7ec69966}.back{color:var(--amber)}
 #rv{width:min(720px,94vw)}#rv h3{margin:0 0 2px;font-size:16px}#rv .meta{color:var(--dim);font-size:12px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap}
@@ -283,7 +446,9 @@ dialog::backdrop{background:#0008}dialog label{display:block;font-size:11.5px;co
 dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>*{flex:1}.actions{display:flex;gap:8px;margin-top:14px}.danger{color:var(--red)}
 @media (max-width:700px){main{grid-template-columns:repeat(6,82vw)}}
 </style></head><body>
-<header><h1>Tickets</h1><select id="project"><option value="">All projects</option></select>
+<header><h1>Tickets</h1>
+<div class="views" role="tablist"><button data-view="tasks">Tasks</button><button data-view="agents">Agents</button></div>
+<select id="project"><option value="">All projects</option></select>
 <span class="muted" id="count"></span><span class="spacer"></span><button id="sync" title="Pull status from cmux">Sync</button></header>
 <main id="board"></main>
 <datalist id="projects"></datalist>
@@ -296,35 +461,82 @@ dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>
 <div class="row"><div><label>Project</label><input name="project" list="projects"></div>
 <div><label>Priority</label><select name="priority"><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></div>
 <div><label>Status</label><select name="status"></select></div></div>
+<div class="row task-only"><div><label>Due</label><input name="due" type="date"></div><div><label>Waiting on</label><input name="waiting_on" placeholder="Who or what you're waiting for"></div></div>
 <label>Details</label><textarea name="body"></textarea>
-<div class="row"><div><label>Branch</label><input name="branch"></div><div><label>PR URL</label><input name="pr_url"></div></div>
-<label>Worktree</label><input name="worktree"><label>cmux workspace</label><input name="workspace_id">
+<div class="agent-only"><div class="row"><div><label>Branch</label><input name="branch"></div><div><label>PR URL</label><input name="pr_url"></div></div>
+<label>Worktree</label><input name="worktree"><label>cmux workspace</label><input name="workspace_id"></div>
+<label>Attachments</label>
+<div id="att" class="att"></div>
+<div class="drop" id="drop">Drop files or paste a screenshot here · <label class="pick">choose files<input type="file" id="pickfile" multiple hidden></label></div>
+<div class="row linkrow"><input id="linkurl" placeholder="https://… link"><input id="linklabel" placeholder="Label (optional)"><button type="button" id="addlink">Add link</button></div>
+<div class="row"><div><label>Board</label><select name="board"><option value="tasks">Tasks</option><option value="agents">Agents</option></select></div><div></div><div></div></div>
 <div class="actions"><button value="save">Save</button><button value="cancel" formnovalidate>Cancel</button><span class="spacer"></span><button value="delete" class="danger" formnovalidate>Delete</button></div>
 </form></dialog>
 <script>
-const COLS=[["backlog","Backlog","var(--dim)"],["todo","Todo","var(--blue)"],["working","Working","var(--orange)"],["needs-you","Needs you","var(--amber)"],["review","Review","var(--purple)"],["done","Done","var(--green)"]];
+const VIEWS={
+  agents:[["backlog","Backlog","var(--dim)"],["todo","Todo","var(--blue)"],["working","Working","var(--orange)"],["needs-you","Needs you","var(--amber)"],["review","Review","var(--purple)"],["done","Done","var(--green)"]],
+  tasks:[["todo","To do","var(--blue)"],["working","Doing","var(--orange)"],["waiting","Waiting on someone","var(--amber)"],["done","Done","var(--green)"]]};
+const GH=`<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true" style="vertical-align:-1px;margin-right:3px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>`;
+const ICO=(d)=>`<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-1px;margin-right:3px">${d}</svg>`;
+const PIC=ICO(`<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><circle cx="5.5" cy="6.25" r="1.25"/><path d="M14.25 10.5l-3.5-3.5-6.5 6.25"/>`);
+const CLOCK=ICO(`<circle cx="8" cy="8" r="6.25"/><path d="M8 4.75V8l2.25 1.5"/>`);
+const CAL=ICO(`<rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.75v2.5M10.5 1.75v2.5"/>`);
+const CLIP=ICO(`<path d="M13.5 7.5l-5.6 5.6a3.5 3.5 0 01-5-5l6-6a2.3 2.3 0 013.3 3.3l-6 6a1.2 1.2 0 01-1.7-1.7l5.5-5.5"/>`);
+const LINK=ICO(`<path d="M6.5 9.5a3 3 0 004.2 0l2.3-2.3a3 3 0 00-4.2-4.2L7.6 4.2"/><path d="M9.5 6.5a3 3 0 00-4.2 0L3 8.8a3 3 0 004.2 4.2l1.2-1.2"/>`);
+const HOURGLASS=ICO(`<path d="M4 1.75h8M4 14.25h8M5 1.75c0 3 6 3.5 6 6.25s-6 3.25-6 6.25M11 1.75c0 3-6 3.5-6 6.25s6 3.25 6 6.25"/>`);
 const H={"Content-Type":"application/json","X-Tickets":"1"};
-let tickets=[],dragging=null,editing=null;
+let tickets=[],dragging=null,editing=null,backing=null,reviewing=null,view="tasks";
 const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const api=(m,u,b)=>fetch(u,{method:m,headers:H,body:b&&JSON.stringify(b)}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
+const api=(m,u,b)=>fetch(u,{method:m,headers:H,body:b&&JSON.stringify(b)}).then(r=>{if(!r.ok)return r.json().then(j=>{throw new Error(j.error||r.status)});return r.json()});
 const ago=t=>{const m=Math.floor((Date.now()/1e3-t)/60);return m<60?m+"m":m<1440?Math.floor(m/60)+"h":Math.floor(m/1440)+"d"};
-try{const p=localStorage.getItem("tk.project");if(p!==null)$("#project").dataset.want=p}catch(e){}
+const store=(k,v)=>{try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}};
+view=store("tk.view")||"tasks";
+{const p=store("tk.project");if(p!==null)$("#project").dataset.want=p}
+const todayISO=()=>{const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)};
+function dueChip(t){if(!t.due||t.status==="done")return t.due?`<span>${CAL}${fmtDate(t.due)}</span>`:"";
+  const days=Math.round((Date.parse(t.due)-Date.parse(todayISO()))/864e5);
+  const cls=days<0?"due late":days<=1?"due soon":"due";
+  const txt=days<0?`overdue ${-days}d`:days===0?"due today":days===1?"due tomorrow":days<7?`due ${new Date(t.due).toLocaleDateString(undefined,{weekday:"short"})}`:`due ${fmtDate(t.due)}`;
+  return `<span class="${cls}" title="Due ${esc(t.due)}">${CAL}${txt}</span>`}
+const fmtDate=iso=>new Date(iso+"T12:00").toLocaleDateString(undefined,{day:"numeric",month:"short"});
 function render(){
-  const proj=$("#project").value,shown=tickets.filter(t=>!proj||t.project===proj);
-  const projects=[...new Set(tickets.map(t=>t.project).filter(Boolean))].sort();
+  document.querySelectorAll(".views button").forEach(b=>b.classList.toggle("on",b.dataset.view===view));
+  const cols=VIEWS[view],mine=tickets.filter(t=>(t.board||"agents")===view);
+  const proj=$("#project").value,shown=mine.filter(t=>!proj||t.project===proj);
+  const projects=[...new Set(mine.map(t=>t.project).filter(Boolean))].sort();
   const sel=$("#project"),want=sel.dataset.want??sel.value;
   sel.innerHTML='<option value="">All projects</option>'+projects.map(p=>`<option>${esc(p)}</option>`).join("");
   sel.value=projects.includes(want)?want:"";delete sel.dataset.want;
+  sel.style.display=projects.length?"":"none";
   $("#projects").innerHTML=projects.map(p=>`<option value="${esc(p)}">`).join("");
   $("#count").textContent=`${shown.filter(t=>t.status!=="done").length} open`;
-  $("#board").innerHTML=COLS.map(([id,name,color])=>{
-    const items=shown.filter(t=>t.status===id);
+  $("#sync").style.display=view==="agents"?"":"none";
+  badge();
+  const main=$("#board");main.style.gridTemplateColumns=`repeat(${cols.length},minmax(200px,1fr))`;
+  main.innerHTML=cols.map(([id,name,color])=>{
+    let items=shown.filter(t=>t.status===id);
+    if(view==="tasks"&&id!=="done")items=items.sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999")||a.priority-b.priority);
+    const addable=view==="tasks"?id==="todo":(id==="backlog"||id==="todo");
     return `<section class="col" data-status="${id}"><h2><span class="dot" style="background:${color}"></span>${name}<span class="spacer"></span>${items.length}</h2>
-    ${id==="backlog"||id==="todo"?`<form class="add" data-status="${id}"><input placeholder="+ Add ticket" name="title"></form>`:""}
-    ${items.map(t=>`<article class="card" draggable="true" data-id="${t.id}"><div class="t">${esc(t.title)}</div>
-    <div class="m"><span>#${t.id}</span>${t.priority==1?'<span class="p1">● high</span>':""}${t.project?`<span class="chip">${esc(t.project)}</span>`:""}
-    ${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">PR</a>`:""}${(t.shots||[]).length?`<span title="screenshots">▣ ${t.shots.length}</span>`:""}<span>${ago(t.updated_at)}</span></div>${verdict(t)}</article>`).join("")}</section>`}).join("");
+    ${addable?`<form class="add" data-status="${id}"><input placeholder="${view==="tasks"?"+ Add task (end with fri, tmr, 15/10…)":"+ Add ticket"}" name="title"></form>`:""}
+    ${items.map(card).join("")}</section>`}).join("");
 }
+function card(t){const n=(t.attachments||[]).length;
+  return `<article class="card" draggable="true" data-id="${t.id}"><div class="t">${esc(t.title)}</div>
+  <div class="m"><span>#${t.id}</span>${t.priority==1?'<span class="p1">● high</span>':""}${t.project?`<span class="chip">${esc(t.project)}</span>`:""}
+  ${dueChip(t)}${t.status==="waiting"&&t.waiting_on?`<span class="wait-on">${HOURGLASS}${esc(t.waiting_on)}</span>`:""}
+  ${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">${GH}PR</a>`:""}
+  ${(t.shots||[]).length?`<span title="Screenshots">${PIC}${t.shots.length}</span>`:""}${n?`<span title="Attachments">${CLIP}${n}</span>`:""}
+  ${t.diff&&(t.diff.added||t.diff.removed)?`<span title="Lines changed"><span class="add-n">+${t.diff.added}</span> <span class="del-n">−${t.diff.removed}</span></span>`:""}${timer(t)}</div>${verdict(t)}</article>`}
+function timer(t){const since=t.status_since||t.updated_at;
+  if((t.board||"agents")==="agents"&&t.status==="working")return `<span class="live w" title="Working since">${CLOCK}working ${ago(since)}</span>`;
+  if(t.status==="needs-you")return `<span class="live n" title="Waiting since"><span class="pulse"></span>waiting ${ago(since)}</span>`;
+  if(t.status==="waiting")return `<span title="Waiting since">${CLOCK}${ago(since)}</span>`;
+  return `<span title="Last updated">${CLOCK}${ago(t.updated_at)}</span>`}
+const ICON=document.querySelector('link[rel="icon"]'),BASE_ICON=ICON.href;
+function waitingOnYou(){const today=todayISO();return tickets.filter(t=>t.status==="needs-you"||(t.status==="review"&&t.review&&!t.decision)||(t.board==="tasks"&&t.status!=="done"&&t.status!=="waiting"&&t.due&&t.due<=today)).length}
+function badge(){const n=waitingOnYou();document.title=n?`(${n}) Tickets`:"Tickets";
+  ICON.href=n?BASE_ICON.replace("%3C/svg%3E","%3Ccircle cx='25' cy='25' r='6.5' fill='%23e5b567' stroke='%232a2a2e' stroke-width='2.5'/%3E%3C/svg%3E"):BASE_ICON}
 function verdict(t){
   if(t.status!=="review")return "";
   if(t.decision==="approved")return `<div class="verdict ok">✓ Approved${t.pr_url?"":" – conductor will push and open the PR"}</div>`;
@@ -346,10 +558,9 @@ function md(src){
 }
 function goal(body){const m=String(body||"").match(/##\s*Goal\s*\n([\s\S]*?)(\n##\s|$)/);
   return (m?m[1]:String(body||"").slice(0,400)).trim()||"(no brief)"}
-let reviewing=null;
 function openReview(t){reviewing=t;const rv=$("#rv");
   rv.querySelector(".body").innerHTML=`<h3>#${t.id} ${esc(t.title)}</h3>
-  <div class="meta">${t.project?`<span class="chip">${esc(t.project)}</span>`:""}${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">PR</a>`:""}</div>
+  <div class="meta">${t.project?`<span class="chip">${esc(t.project)}</span>`:""}${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">${GH}PR</a>`:""}</div>
   <h4>Asked for</h4><div class="md">${md(goal(t.body))}</div>
   ${t.review?`<div class="md">${md(t.review)}</div>`:`<h4>Review</h4><p class="wait">Waiting for the conductor's review.</p>`}
   ${(t.shots||[]).length?`<h4>Screenshots</h4><div class="shots">${t.shots.map(s=>`<figure><a href="${esc(s.url)}" target="_blank"><img src="${esc(s.url)}" alt="${esc(s.caption)}" loading="lazy"></a>${s.caption?`<figcaption>${esc(s.caption)}</figcaption>`:""}</figure>`).join("")}</div>`:""}
@@ -359,18 +570,19 @@ function openReview(t){reviewing=t;const rv=$("#rv");
     `<button value="close" autofocus>Close</button><span class="spacer"></span><a data-edit>Edit ticket ›</a>`;
   rv.showModal()}
 async function load(){if(dragging||editing||backing||reviewing)return;try{tickets=await api("GET","/api/tickets");render()}catch(e){}}
-$("#project").onchange=()=>{try{localStorage.setItem("tk.project",$("#project").value)}catch(e){}render()};
+document.querySelectorAll(".views button").forEach(b=>b.onclick=()=>{view=b.dataset.view;store("tk.view",view);$("#project").value="";render()});
+$("#project").onchange=()=>{store("tk.project",$("#project").value);render()};
 $("#sync").onclick=async()=>{await api("POST","/api/sync");load()};
 document.addEventListener("submit",async e=>{const f=e.target;if(!f.classList.contains("add"))return;e.preventDefault();
-  const title=f.title.value.trim();if(!title)return;await api("POST","/api/tickets",{title,status:f.dataset.status,project:$("#project").value});f.reset();load()});
+  const title=f.title.value.trim();if(!title)return;
+  await api("POST","/api/tickets",{title,status:f.dataset.status,project:$("#project").value,board:view,quick:view==="tasks"});f.reset();load()});
 document.addEventListener("dragstart",e=>{const c=e.target.closest(".card");if(c){dragging=c.dataset.id;e.dataTransfer.setData("text/plain",dragging)}});
 document.addEventListener("dragend",()=>{dragging=null;document.querySelectorAll(".over").forEach(x=>x.classList.remove("over"))});
 document.addEventListener("dragover",e=>{const col=e.target.closest(".col");if(col&&dragging){e.preventDefault();document.querySelectorAll(".over").forEach(x=>x!==col&&x.classList.remove("over"));col.classList.add("over")}});
 document.addEventListener("drop",async e=>{const col=e.target.closest(".col");if(!col||!dragging)return;e.preventDefault();const id=dragging;dragging=null;
   const t=tickets.find(x=>x.id==id);if(t)t.status=col.dataset.status;render();await api("PATCH","/api/tickets/"+id,{status:col.dataset.status});load()});
 const dlg=$("#edit"),form=$("#form");
-form.status.innerHTML=COLS.map(([id,name])=>`<option value="${id}">${name}</option>`).join("");
-const backDlg=$("#back"),backForm=$("#backform");let backing=null;
+const backDlg=$("#back"),backForm=$("#backform");
 document.addEventListener("click",async e=>{const b=e.target.closest("button[data-act]");if(!b)return;e.stopPropagation();
   const id=b.closest(".card").dataset.id;
   if(b.dataset.act==="approve"){await api("POST",`/api/tickets/${id}/decision`,{decision:"approved"});load()}
@@ -378,7 +590,35 @@ document.addEventListener("click",async e=>{const b=e.target.closest("button[dat
 backDlg.addEventListener("close",async()=>{const id=backing;backing=null;
   if(id&&backDlg.returnValue==="send"&&backForm.note.value.trim()){await api("POST",`/api/tickets/${id}/decision`,{decision:"changes",note:backForm.note.value});}
   load()});
-function openEdit(t){editing=t;for(const k of["title","project","priority","status","body","branch","pr_url","worktree","workspace_id"])form[k].value=t[k]??"";dlg.showModal()}
+// --- edit dialog + attachments ---
+const FIELDS_EDIT=["title","project","priority","status","body","branch","pr_url","worktree","workspace_id","due","waiting_on","board"];
+function renderAtt(t){const list=t.attachments||[];
+  $("#att").innerHTML=list.length?list.map(a=>`<div class="att-item">${a.image?`<a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" alt=""></a>`:""}
+    <a href="${esc(a.url)}" target="_blank" class="att-name">${a.kind==="link"?LINK:CLIP}${esc(a.label)}</a>
+    <button type="button" class="x" data-del="${a.id}" title="Remove">×</button></div>`).join(""):`<p class="muted" style="margin:2px 0">None yet.</p>`}
+async function refreshEditing(){const all=await api("GET","/api/tickets");tickets=all;const t=all.find(x=>x.id===editing.id);if(t){editing=t;renderAtt(t)}}
+function openEdit(t){editing=t;const b=t.board||"agents";
+  form.status.innerHTML=VIEWS[b].map(([id,name])=>`<option value="${id}">${name}</option>`).join("");
+  for(const k of FIELDS_EDIT)form[k].value=t[k]??(k==="board"?"agents":"");
+  form.classList.toggle("is-task",b==="tasks");renderAtt(t);$("#linkurl").value="";$("#linklabel").value="";dlg.showModal()}
+form.board.onchange=()=>{const b=form.board.value,cur=form.status.value;form.status.innerHTML=VIEWS[b].map(([id,name])=>`<option value="${id}">${name}</option>`).join("");
+  form.status.value=VIEWS[b].some(c=>c[0]===cur)?cur:"todo";form.classList.toggle("is-task",b==="tasks")};
+async function upload(files){for(const f of files){
+  await fetch(`/api/tickets/${editing.id}/files`,{method:"POST",headers:{"X-Tickets":"1","X-Filename":encodeURIComponent(f.name||"pasted.png"),"Content-Type":"application/octet-stream"},body:f})}
+  await refreshEditing()}
+$("#pickfile").onchange=e=>{upload([...e.target.files]);e.target.value=""};
+const drop=$("#drop");
+drop.addEventListener("dragover",e=>{e.preventDefault();e.stopPropagation();drop.classList.add("over")});
+drop.addEventListener("dragleave",()=>drop.classList.remove("over"));
+drop.addEventListener("drop",e=>{e.preventDefault();e.stopPropagation();drop.classList.remove("over");upload([...e.dataTransfer.files])});
+dlg.addEventListener("paste",e=>{const files=[...(e.clipboardData?.files||[])];if(!files.length)return;e.preventDefault();
+  upload(files.map((f,i)=>f.name&&f.name!=="image.png"?f:new File([f],`screenshot-${new Date().toISOString().slice(0,19).replace(/[T:]/g,"-")}${i?"-"+i:""}.png`,{type:f.type})))});
+$("#addlink").onclick=async()=>{const url=$("#linkurl").value.trim();if(!url)return;
+  try{await api("POST",`/api/tickets/${editing.id}/links`,{url:/^[a-z]+:/i.test(url)?url:"https://"+url,label:$("#linklabel").value.trim()})}catch(err){alertLine(err.message);return}
+  $("#linkurl").value="";$("#linklabel").value="";refreshEditing()};
+$("#linkurl").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#addlink").click()}});
+$("#att").addEventListener("click",async e=>{const x=e.target.closest("[data-del]");if(!x)return;await api("DELETE",`/api/attachments/${x.dataset.del}`);refreshEditing()});
+function alertLine(msg){$("#att").insertAdjacentHTML("beforeend",`<p class="del-n" style="margin:4px 0">${esc(msg)}</p>`)}
 const rvDlg=$("#rv");
 rvDlg.addEventListener("click",e=>{if(e.target.closest("[data-edit]")){const t=reviewing;rvDlg.close("edit");openEdit(t)}});
 rvDlg.addEventListener("close",async()=>{const t=reviewing;reviewing=null;if(!t)return;
@@ -386,10 +626,12 @@ rvDlg.addEventListener("close",async()=>{const t=reviewing;reviewing=null;if(!t)
   else if(rvDlg.returnValue==="back"){backing=String(t.id);backForm.note.value="";backDlg.showModal();return}
   load()});
 document.addEventListener("click",e=>{const c=e.target.closest(".card");if(!c||e.target.closest("a,button"))return;
-  const t=tickets.find(x=>x.id==c.dataset.id);if(t.status==="review"||(t.status==="done"&&t.review)){openReview(t);return}editing=t;for(const k of["title","project","priority","status","body","branch","pr_url","worktree","workspace_id"])form[k].value=t[k]??"";dlg.showModal()});
+  const t=tickets.find(x=>x.id==c.dataset.id);if(t.status==="review"||(t.status==="done"&&t.review)){openReview(t);return}openEdit(t)});
 dlg.addEventListener("close",async()=>{const t=editing;editing=null;if(!t)return;
   if(dlg.returnValue==="delete"){await api("DELETE","/api/tickets/"+t.id)}
-  else if(dlg.returnValue==="save"){const d=Object.fromEntries(new FormData(form));d.priority=+d.priority;await api("PATCH","/api/tickets/"+t.id,d)}
+  else if(dlg.returnValue==="save"){const d=Object.fromEntries(new FormData(form));d.priority=+d.priority;
+    for(const k of["branch","pr_url","worktree","workspace_id"])if(d[k]===undefined)delete d[k];
+    try{await api("PATCH","/api/tickets/"+t.id,d)}catch(err){}}
   load()});
 load();setInterval(load,4000);
 </script></body></html>"""
@@ -401,12 +643,15 @@ class Board(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send(self, code, payload=None, ctype="application/json"):
+    def _send(self, code, payload=None, ctype="application/json", headers=None):
         body = payload if isinstance(payload, bytes) else payload.encode() if isinstance(payload, str) else json.dumps(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -437,19 +682,51 @@ class Board(BaseHTTPRequestHandler):
                 if not f.is_file():
                     return self._send(404, {"error": "no such screenshot"})
                 return self._send(200, f.read_bytes(), IMAGE_TYPES[f.suffix])
+            fm = re.fullmatch(r"/files/(\d+)/([a-z0-9-]+(?:\.[a-z0-9]{1,8})?)", path)
+            if method == "GET" and fm:
+                f = FILES / fm[1] / fm[2]
+                if not f.is_file():
+                    return self._send(404, {"error": "no such file"})
+                inline = INLINE_TYPES.get(f.suffix)
+                at = conn.execute("SELECT label FROM attachments WHERE ticket_id = ? AND target = ?", (int(fm[1]), fm[2])).fetchone()
+                name = re.sub(r'[^\w. -]', "_", at["label"] if at else f.name)
+                return self._send(200, f.read_bytes(), inline or "application/octet-stream",
+                                  {"Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{name}"'})
             if method == "GET" and path == "/api/tickets":
-                return self._send(200, list_tickets(conn))
+                tickets = list_tickets(conn)
+                for t in tickets:
+                    if t["worktree"] and t["branch"] and Path(t["worktree"]).is_dir():
+                        t["diff"] = diff_stat(t["worktree"])
+                return self._send(200, tickets)
             if method == "POST" and path == "/api/tickets":
                 d = self._json()
                 if not str(d.get("title", "")).strip():
                     return self._send(400, {"error": "title required"})
-                return self._send(201, create(conn, d["title"], d.get("project", ""), d.get("body", ""),
-                                              d.get("status", "backlog"), d.get("priority", 2)))
+                title, due = (split_due(d["title"]) if d.get("quick") else (d["title"], d.get("due")))
+                return self._send(201, create(conn, title, d.get("project", ""), d.get("body", ""),
+                                              d.get("status", "backlog"), d.get("priority", 2),
+                                              d.get("board", "agents"), due, d.get("waiting_on")))
             if method == "POST" and path == "/api/sync":
                 return self._send(200, sync(conn))
             m = re.fullmatch(r"/api/tickets/(\d+)", path)
             if m and method == "PATCH":
                 return self._send(200, update(conn, int(m[1]), **self._json()))
+            lk = re.fullmatch(r"/api/tickets/(\d+)/links", path)
+            if lk and method == "POST":
+                body = self._json()
+                return self._send(201, {"id": add_link(conn, int(lk[1]), body.get("url", "").strip(), body.get("label", ""))})
+            up = re.fullmatch(r"/api/tickets/(\d+)/files", path)
+            if up and method == "POST":
+                from urllib.parse import unquote
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > 25 * 1024 * 1024:
+                    return self._send(413, {"error": "files are limited to 25 MB"})
+                name = unquote(self.headers.get("X-Filename", "file"))
+                return self._send(201, {"id": add_file(conn, int(up[1]), name, self.rfile.read(n))})
+            ra = re.fullmatch(r"/api/attachments/(\d+)", path)
+            if ra and method == "DELETE":
+                remove_attachment(conn, int(ra[1]))
+                return self._send(200, {"deleted": int(ra[1])})
             d = re.fullmatch(r"/api/tickets/(\d+)/decision", path)
             if d and method == "POST":
                 body = self._json()
@@ -494,25 +771,60 @@ def serve(port):
 
 # --- CLI ---------------------------------------------------------------------------
 
+TASK_HELP = """t – quick tasks on the board's Tasks view
+
+  t                          list open tasks
+  t Order phone for Jess fri add a task; a last word that reads as a date sets the due date
+                             (today, tomorrow, mon..sun, +3d, 15/10, 2026-10-15)
+  t done 12 · t doing 12 · t wait 12 "the supplier" · t todo 12
+  t attach 12 <url|file> · t show 12 · t rm 12
+"""
+
+
+def task_args(argv):
+    """Translate `t …` into tk arguments for the Tasks board."""
+    if not argv:
+        return ["ls", "-b", "tasks"]
+    head, rest = argv[0], argv[1:]
+    if head in ("-h", "--help", "help"):
+        print(TASK_HELP); sys.exit(0)
+    moves = {"done": "done", "doing": "working", "todo": "todo"}
+    if head in moves and rest[:1] and rest[0].isdigit():
+        return ["mv", rest[0], moves[head]] + rest[1:]
+    if head == "wait" and rest[:1] and rest[0].isdigit():
+        return ["wait", *rest]
+    if head in ("show", "rm", "attach", "edit", "ls") and rest[:1] and (rest[0].isdigit() or head == "ls"):
+        return [head, *rest] + (["-b", "tasks"] if head == "ls" else [])
+    title, due = split_due(" ".join(argv))
+    return ["add", title, "-b", "tasks"] + (["--due", due] if due else [])
+
+
 def main():
+    if Path(sys.argv[0]).name == "t":
+        sys.argv[1:] = task_args(sys.argv[1:])
     ap = argparse.ArgumentParser(prog="tk", description="Local ticket board linked to cmux.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("add", help="create a ticket")
     p.add_argument("title"); p.add_argument("-p", "--project"); p.add_argument("-d", "--body", default="")
-    p.add_argument("-s", "--status", default="backlog", choices=STATUSES); p.add_argument("-P", "--priority", type=int, default=2, choices=[1, 2, 3])
+    p.add_argument("-s", "--status", default=None, choices=STATUSES); p.add_argument("-P", "--priority", type=int, default=2, choices=[1, 2, 3])
+    p.add_argument("-b", "--board", default="agents", choices=BOARDS); p.add_argument("--due"); p.add_argument("-w", "--waiting-on")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("ls", help="list tickets")
     p.add_argument("-p", "--project", help="project name, or . for the current repo"); p.add_argument("-s", "--status", choices=STATUSES)
     p.add_argument("-a", "--all", action="store_true", help="include all done tickets"); p.add_argument("--json", action="store_true")
+    p.add_argument("-b", "--board", choices=BOARDS)
 
     p = sub.add_parser("show", help="show one ticket"); p.add_argument("id", type=int); p.add_argument("--json", action="store_true")
     p = sub.add_parser("mv", help="move a ticket to a column"); p.add_argument("id", type=int); p.add_argument("status", choices=STATUSES)
 
     p = sub.add_parser("edit", help="change a ticket's fields")
     p.add_argument("id", type=int); p.add_argument("--title"); p.add_argument("-d", "--body"); p.add_argument("-p", "--project")
-    p.add_argument("-P", "--priority", type=int, choices=[1, 2, 3])
+    p.add_argument("-P", "--priority", type=int, choices=[1, 2, 3]); p.add_argument("--due"); p.add_argument("-w", "--waiting-on")
+
+    p = sub.add_parser("attach", help="attach a link or a file to a ticket")
+    p.add_argument("id", type=int); p.add_argument("target", help="URL or file path"); p.add_argument("-l", "--label", default="")
 
     p = sub.add_parser("link", help="link a ticket to a cmux workspace, worktree, branch or PR")
     p.add_argument("id", type=int); p.add_argument("--workspace", help="workspace UUID, or 'here'")
@@ -528,6 +840,7 @@ def main():
     p.add_argument("id", type=int); p.add_argument("image", nargs="?"); p.add_argument("-c", "--caption", default="")
     p.add_argument("--clear", action="store_true", help="remove this ticket's screenshots")
     p = sub.add_parser("done", help="mark done"); p.add_argument("id", type=int)
+    p = sub.add_parser("wait", help="move a task to Waiting on someone"); p.add_argument("id", type=int); p.add_argument("who", nargs="?", default="")
     p = sub.add_parser("rm", help="delete a ticket"); p.add_argument("id", type=int)
     p = sub.add_parser("sync", help="pull status from cmux"); p.add_argument("--json", action="store_true")
     p = sub.add_parser("serve", help="run the web board"); p.add_argument("--port", type=int, default=PORT)
@@ -537,11 +850,14 @@ def main():
     conn = db()
     try:
         if a.cmd == "add":
-            t = create(conn, a.title, a.project or current_project(), a.body, a.status, a.priority)
-            print(json.dumps(t) if a.json else f"Created #{t['id']} {t['title']} ({t['project']}, {t['status']})")
+            tasks = a.board == "tasks"
+            t = create(conn, a.title, a.project if a.project is not None else ("" if tasks else current_project()), a.body,
+                       a.status or ("todo" if tasks else "backlog"), a.priority, a.board, a.due, a.waiting_on)
+            where = ", ".join(x for x in [t["project"], t["status"], t["due"] and f"due {t['due']}"] if x)
+            print(json.dumps(t) if a.json else f"Created #{t['id']} {t['title']} ({where})")
         elif a.cmd == "ls":
             project = current_project() if a.project == "." else a.project
-            ts = list_tickets(conn, project, a.status, a.all)
+            ts = list_tickets(conn, project, a.status, a.all, a.board)
             print(json.dumps(ts)) if a.json else print_tickets(ts)
         elif a.cmd == "show":
             t = get(conn, a.id) or sys.exit(f"No ticket #{a.id}")
@@ -558,7 +874,16 @@ def main():
         elif a.cmd == "mv":
             t = update(conn, a.id, status=a.status); print(f"#{t['id']} → {t['status']}")
         elif a.cmd == "edit":
-            t = update(conn, a.id, title=a.title, body=a.body, project=a.project, priority=a.priority); print(f"Updated #{t['id']}")
+            t = update(conn, a.id, title=a.title, body=a.body, project=a.project, priority=a.priority,
+                       due=a.due, waiting_on=a.waiting_on); print(f"Updated #{t['id']}")
+        elif a.cmd == "attach":
+            if re.match(r"^[a-z]+:", a.target) and not a.target.startswith("file://"):
+                add_link(conn, a.id, a.target, a.label); print(f"Linked {a.target} to #{a.id}")
+            else:
+                f = Path(a.target[7:] if a.target.startswith("file://") else a.target).expanduser()
+                if not f.is_file():
+                    sys.exit(f"{f} is not a file")
+                add_file(conn, a.id, f.name, f.read_bytes(), a.label); print(f"Attached {f.name} to #{a.id}")
         elif a.cmd == "link":
             ws = os.environ.get("CMUX_WORKSPACE_ID") if a.workspace == "here" else a.workspace
             if a.workspace == "here" and not ws:
@@ -584,6 +909,9 @@ def main():
                 sys.exit("give an image path, or --clear")
         elif a.cmd == "undecide":
             decide(conn, a.id, None); print(f"#{a.id} decision cleared")
+        elif a.cmd == "wait":
+            t = update(conn, a.id, status="waiting", waiting_on=a.who or None)
+            print(f"#{t['id']} waiting" + (f" on {a.who}" if a.who else ""))
         elif a.cmd == "done":
             t = update(conn, a.id, status="done"); print(f"#{t['id']} done")
         elif a.cmd == "rm":

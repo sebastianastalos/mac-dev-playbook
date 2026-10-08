@@ -15,6 +15,26 @@
     mode: "0755"
   notify: Restart tickets board
 
+- name: Link t, the quick-task command
+  ansible.builtin.file:
+    src: "{{ tickets_home }}/.local/bin/tk"
+    dest: "{{ tickets_home }}/.local/bin/t"
+    state: link
+
+- name: Create Raycast script commands directory
+  ansible.builtin.file:
+    path: "{{ tickets_home }}/.config/raycast/script-commands"
+    state: directory
+    mode: "0755"
+
+# Raycast picks these up once the folder is added under
+# Settings → Extensions → Script Commands → Add Directories.
+- name: Install Raycast task commands
+  ansible.builtin.copy:
+    src: raycast/
+    dest: "{{ tickets_home }}/.config/raycast/script-commands/"
+    mode: "0755"
+
 - name: Install tickets board launch agent
   ansible.builtin.template:
     src: local.tickets.plist.j2
