@@ -1,91 +1,26 @@
 ---
-# tk: local ticket board (CLI + web board on 127.0.0.1:7717), kept running by launchd.
-# Status sync from cmux runs via Claude Code hooks (see claude_code role).
+# tickets lives in its own private repo (sebastianastalos/tickets): a local kanban,
+# the tk/t commands, Raycast commands, launchd jobs and the conductor skill.
+# Cloned with the personal account's token, then its install.sh does the rest.
 
-# 0700: tickets, attachments and screenshots are readable by this account only.
-- name: Create tickets data directory
-  ansible.builtin.file:
-    path: "{{ tickets_home }}/.local/share/tickets"
-    state: directory
-    mode: "0700"
+- name: Clone or update tickets
+  ansible.builtin.shell: |
+    set -euo pipefail
+    helper='!f() { echo username=x-access-token; echo "password=$(gh auth token --user sebastianastalos)"; }; f'
+    if [ -d "{{ tickets_dir }}/.git" ]; then
+      before=$(git -C "{{ tickets_dir }}" rev-parse HEAD)
+      git -C "{{ tickets_dir }}" -c credential.helper= -c credential.helper="$helper" pull -q --ff-only
+      [ "$before" = "$(git -C "{{ tickets_dir }}" rev-parse HEAD)" ] && echo unchanged || echo updated
+    else
+      git -c credential.helper= -c credential.helper="$helper" clone -q https://github.com/sebastianastalos/tickets.git "{{ tickets_dir }}"
+      echo cloned
+    fi
+  args:
+    executable: /bin/bash
+  register: tickets_repo
+  changed_when: tickets_repo.stdout != "unchanged"
 
-- name: Install tk
-  ansible.builtin.copy:
-    src: tk
-    dest: "{{ tickets_home }}/.local/bin/tk"
-    mode: "0755"
-  notify: Restart tickets board
-
-- name: Link t, the quick-task command
-  ansible.builtin.file:
-    src: "{{ tickets_home }}/.local/bin/tk"
-    dest: "{{ tickets_home }}/.local/bin/t"
-    state: link
-
-- name: Create Raycast script commands directory
-  ansible.builtin.file:
-    path: "{{ tickets_home }}/.config/raycast/script-commands"
-    state: directory
-    mode: "0755"
-
-# Raycast picks these up once the folder is added under
-# Settings → Extensions → Script Commands → Add Directories.
-- name: Install Raycast task commands
-  ansible.builtin.copy:
-    src: raycast/
-    dest: "{{ tickets_home }}/.config/raycast/script-commands/"
-    mode: "0755"
-
-- name: Install tickets board launch agent
-  ansible.builtin.template:
-    src: local.tickets.plist.j2
-    dest: "{{ tickets_home }}/Library/LaunchAgents/local.tickets.plist"
-    mode: "0644"
-  register: tickets_plist
-
-- name: Check whether the tickets board is loaded
-  ansible.builtin.command: launchctl print gui/{{ ansible_facts['user_uid'] }}/local.tickets
-  register: tickets_loaded
-  changed_when: false
-  failed_when: false
-  check_mode: false
-
-- name: Unload outdated tickets board
-  ansible.builtin.command: launchctl bootout gui/{{ ansible_facts['user_uid'] }}/local.tickets
-  when: tickets_plist.changed and tickets_loaded.rc == 0
-  changed_when: true
-
-- name: Load tickets board
-  ansible.builtin.command: >-
-    launchctl bootstrap gui/{{ ansible_facts['user_uid'] }}
-    {{ tickets_home }}/Library/LaunchAgents/local.tickets.plist
-  when: tickets_plist.changed or tickets_loaded.rc != 0
-  changed_when: true
-
-# Daily zip of the board's data to iCloud Drive/Backups/tickets, newest 14 kept.
-# Restore with: tk restore <zip> --yes
-- name: Install tickets backup launch agent
-  ansible.builtin.template:
-    src: local.tickets.backup.plist.j2
-    dest: "{{ tickets_home }}/Library/LaunchAgents/local.tickets.backup.plist"
-    mode: "0644"
-  register: tickets_backup_plist
-
-- name: Check whether the tickets backup is loaded
-  ansible.builtin.command: launchctl print gui/{{ ansible_facts['user_uid'] }}/local.tickets.backup
-  register: tickets_backup_loaded
-  changed_when: false
-  failed_when: false
-  check_mode: false
-
-- name: Unload outdated tickets backup
-  ansible.builtin.command: launchctl bootout gui/{{ ansible_facts['user_uid'] }}/local.tickets.backup
-  when: tickets_backup_plist.changed and tickets_backup_loaded.rc == 0
-  changed_when: true
-
-- name: Load tickets backup
-  ansible.builtin.command: >-
-    launchctl bootstrap gui/{{ ansible_facts['user_uid'] }}
-    {{ tickets_home }}/Library/LaunchAgents/local.tickets.backup.plist
-  when: tickets_backup_plist.changed or tickets_backup_loaded.rc != 0
-  changed_when: true
+- name: Install tickets
+  ansible.builtin.command: "{{ tickets_dir }}/install.sh"
+  register: tickets_install
+  changed_when: "'installed' in tickets_install.stdout or 'added' in tickets_install.stdout or tickets_repo.changed"

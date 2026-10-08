@@ -15,13 +15,6 @@
     mode: "0644"
     directory_mode: "0755"
 
-- name: Deploy Claude Code skills
-  ansible.builtin.copy:
-    src: skills/
-    dest: "{{ ansible_facts['env']['HOME'] }}/.claude/skills/"
-    mode: preserve
-    directory_mode: "0755"
-
 - name: Deploy Claude Code status line script
   ansible.builtin.copy:
     src: statusline.py
@@ -34,25 +27,7 @@
   register: claude_code_settings_file
   failed_when: false
 
-- name: Add tk sync hooks to Claude Code settings  # noqa: jinja[invalid]
-  ansible.builtin.set_fact:
-    claude_code_hooks: >-
-      {{ claude_code_hooks | default(_current.hooks | default({}))
-         | combine({item: _existing + ([_hook] if _cmd not in _commands else [])}) }}
-  loop: [UserPromptSubmit, Notification, Stop]
-  vars:
-    _current: >-
-      {{ (claude_code_settings_file.content | b64decode | from_json)
-         if claude_code_settings_file.content is defined else {} }}
-    _hook:
-      hooks:
-        - type: command
-          command: "{{ _cmd }}"
-    _cmd: "(~/.local/bin/tk sync >/dev/null 2>&1 &)"
-    _commands: "{{ _existing | map(attribute='hooks') | flatten | map(attribute='command') | list }}"
-    _existing: "{{ (claude_code_hooks | default(_current.hooks | default({}))).get(item, []) }}"
-
-- name: Merge status line, mods and hooks into Claude Code settings
+- name: Merge status line and mods into Claude Code settings
   ansible.builtin.copy:
     content: "{{ _merged | to_nice_json(indent=2, sort_keys=false) }}\n"
     dest: "{{ ansible_facts['env']['HOME'] }}/.claude/settings.json"
@@ -72,4 +47,4 @@
              'CLAUDE_CODE_PLUGIN_DIRS': claude_code_mods
                | map('regex_replace', '^', '~/.claude/mods/') | join(':')
            }
-         }, recursive=true) | combine({'hooks': claude_code_hooks}) }}
+         }, recursive=true) }}

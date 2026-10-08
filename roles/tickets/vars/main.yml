@@ -1,2 +1,2 @@
 ---
-tickets_home: "{{ ansible_facts['env']['HOME'] }}"
+tickets_dir: "{{ ansible_facts['env']['HOME'] }}/tickets"
