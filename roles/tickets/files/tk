@@ -524,7 +524,7 @@ dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>
 <div class="drop" id="drop">Drop files or paste a screenshot here · <label class="pick">choose files<input type="file" id="pickfile" multiple hidden></label></div>
 <div class="row linkrow"><input id="linkurl" placeholder="https://… link"><input id="linklabel" placeholder="Label (optional)"><button type="button" id="addlink">Add link</button></div>
 <div class="row"><div><label>Board</label><select name="board"><option value="tasks">Tasks</option><option value="agents">Agents</option></select></div><div></div><div></div></div>
-<div class="actions"><button value="save" id="savebtn">Save</button><button value="cancel" formnovalidate>Cancel</button><span class="spacer"></span><button value="delete" class="danger" id="delbtn" formnovalidate>Delete</button></div>
+<div class="actions"><button value="save" id="savebtn">Save</button><button value="cancel" formnovalidate>Cancel</button><span class="spacer"></span><button type="button" class="danger" id="delbtn">Delete</button></div>
 </form></dialog>
 <script>
 const VIEWS={
@@ -717,6 +717,16 @@ document.addEventListener("click",e=>{const b=e.target.closest("[data-new]");if(
 document.addEventListener("keydown",e=>{if(e.key.toLowerCase()==="n"&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!document.querySelector("dialog[open]")&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();openNew("todo")}});
 {const q=new URLSearchParams(location.search);if(q.has("new")){view="tasks";store("tk.view",view);history.replaceState(null,"","/");
   api("GET","/api/tickets").then(all=>{tickets=all;render();openNew("todo",q.get("new")||"")})}}
+// A dialog keeps its last returnValue until something sets a new one, so Esc after a
+// Delete used to delete the next ticket opened. Start every opening clean; Esc is cancel.
+for(const d of document.querySelectorAll("dialog")){
+  const show=d.showModal.bind(d);d.showModal=()=>{d.returnValue="";show()};
+  d.addEventListener("cancel",()=>{d.returnValue="cancel"})}
+$("#delbtn").onclick=()=>{const b=$("#delbtn");
+  if(b.dataset.armed){dlg.close("delete");return}
+  b.dataset.armed="1";b.textContent="Click again to delete";
+  setTimeout(()=>{delete b.dataset.armed;b.textContent="Delete"},4000)};
+dlg.addEventListener("close",()=>{const b=$("#delbtn");delete b.dataset.armed;b.textContent="Delete"});
 load();setInterval(load,4000);
 </script></body></html>"""
 
