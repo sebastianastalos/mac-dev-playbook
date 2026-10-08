@@ -480,6 +480,9 @@ main{display:grid;grid-template-columns:repeat(6,minmax(200px,1fr));gap:10px;pad
 .pick{display:inline;color:var(--blue);cursor:pointer;margin:0;font-size:12px}.linkrow{margin-top:6px}.linkrow input{flex:2}.linkrow button{flex:0 0 auto}
 .newbtn{width:100%;text-align:left;color:var(--dim);border-style:dashed;display:flex;justify-content:space-between;align-items:center}
 .newbtn:hover{color:var(--text)}kbd{font:11px ui-monospace,monospace;border:1px solid var(--edge);border-radius:4px;padding:0 4px;color:var(--dim)}
+.links{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.lchip{display:inline-flex;align-items:center;max-width:100%;border:1px solid var(--edge);border-radius:6px;padding:1px 7px;font-size:11.5px;color:var(--blue)!important}
+.lchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lchip:hover{background:var(--cardHover)}
 .task-only{display:none}#form.is-task .task-only{display:flex}#form.is-task .agent-only{display:none}.del-n{color:var(--red)}
 .live{font-weight:600}.live.w{color:var(--orange)}.live.n{color:var(--amber)}
 .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);margin-right:4px;animation:pulse 1.6s ease-in-out infinite}
@@ -575,13 +578,18 @@ function render(){
     ${addable?(view==="tasks"?`<button class="newbtn" data-new="${id}">+ New task <kbd>N</kbd></button>`:`<form class="add" data-status="${id}"><input placeholder="+ Add ticket" name="title"></form>`):""}
     ${items.map(card).join("")}</section>`}).join("");
 }
-function card(t){const n=(t.attachments||[]).length;
+const host=u=>{try{return new URL(u).hostname.replace(/^www\./,"")}catch(e){return u}};
+function linkChips(t){const links=(t.attachments||[]).filter(a=>a.kind==="link");if(!links.length)return "";
+  const shown=links.slice(0,3).map(a=>{const name=a.label&&a.label!==a.url?a.label:host(a.url);
+    return `<a class="lchip" href="${esc(a.url)}" target="_blank" rel="noopener" title="${esc(a.url)}" draggable="false">${LINK}<span>${esc(name)}</span></a>`}).join("");
+  return `<div class="links">${shown}${links.length>3?`<span class="muted">+${links.length-3}</span>`:""}</div>`}
+function card(t){const n=(t.attachments||[]).filter(a=>a.kind!=="link").length;
   return `<article class="card" draggable="true" data-id="${t.id}"><div class="t">${esc(t.title)}</div>
   <div class="m"><span>#${t.id}</span>${t.priority==1?'<span class="p1">● high</span>':""}${t.project?`<span class="chip">${esc(t.project)}</span>`:""}
   ${dueChip(t)}${t.status==="waiting"&&t.waiting_on?`<span class="wait-on">${HOURGLASS}${esc(t.waiting_on)}</span>`:""}
   ${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">${GH}PR</a>`:""}
-  ${(t.shots||[]).length?`<span title="Screenshots">${PIC}${t.shots.length}</span>`:""}${n?`<span title="Attachments">${CLIP}${n}</span>`:""}
-  ${t.diff&&(t.diff.added||t.diff.removed)?`<span title="Lines changed"><span class="add-n">+${t.diff.added}</span> <span class="del-n">−${t.diff.removed}</span></span>`:""}${timer(t)}</div>${verdict(t)}</article>`}
+  ${(t.shots||[]).length?`<span title="Screenshots">${PIC}${t.shots.length}</span>`:""}${n?`<span title="Files">${CLIP}${n}</span>`:""}
+  ${t.diff&&(t.diff.added||t.diff.removed)?`<span title="Lines changed"><span class="add-n">+${t.diff.added}</span> <span class="del-n">−${t.diff.removed}</span></span>`:""}${timer(t)}</div>${linkChips(t)}${verdict(t)}</article>`}
 function timer(t){const since=t.status_since||t.updated_at;
   if((t.board||"agents")==="agents"&&t.status==="working")return `<span class="live w" title="Working since">${CLOCK}working ${ago(since)}</span>`;
   if(t.status==="needs-you")return `<span class="live n" title="Waiting since"><span class="pulse"></span>waiting ${ago(since)}</span>`;
