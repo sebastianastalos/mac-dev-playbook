@@ -3,6 +3,7 @@
 
   conductor spawn <ticket> [--repo <path> | --dir <path>] [--base <ref>] [--mode auto] [--dry-run]
   conductor status [--json]
+  conductor wait [--timeout 3600]   # until a worker needs you/finishes or a review is decided
   conductor cleanup <ticket> [--force]
 
 Each worker gets a cmux workspace running Claude Code with the ticket's brief, in:
@@ -208,6 +209,30 @@ def status(a):
         print(f"#{r['id']:<4} {r['status']:<10} cmux:{ws:<16} {where}  {r['pr'] or ''}  {r['title']}")
 
 
+def snapshot():
+    return {t["id"]: (t["status"], t.get("decision")) for t in tk("ls")
+            if t["workspace_id"] or t["status"] == "review"}
+
+
+def wait(a):
+    """Block until a worker needs attention or the user decides on a review, then print what changed."""
+    before, deadline = snapshot(), time.time() + a.timeout
+    while time.time() < deadline:
+        time.sleep(a.every)
+        now, events = snapshot(), []
+        for tid, (st, dec) in now.items():
+            old_st, old_dec = before.get(tid, (None, None))
+            if st != old_st and st in ("needs-you", "review", "done"):
+                events.append({"ticket": tid, "event": st})
+            if dec and dec != old_dec:
+                events.append({"ticket": tid, "event": dec})
+        if events:
+            print(json.dumps(events))
+            return
+        before = now
+    print(json.dumps([]))
+
+
 def cleanup(a):
     t = tk("show", str(a.ticket))
     if t["status"] != "done" and not a.force:
@@ -256,9 +281,11 @@ def main():
                    choices=["auto", "acceptEdits", "manual", "plan", "dontAsk"])
     p.add_argument("--force", action="store_true")
     p = sub.add_parser("status"); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("wait", help="wait until a worker needs you, finishes, or a review is decided")
+    p.add_argument("--timeout", type=int, default=3600); p.add_argument("--every", type=int, default=15)
     p = sub.add_parser("cleanup"); p.add_argument("ticket", type=int); p.add_argument("--force", action="store_true")
     a = ap.parse_args()
-    {"spawn": spawn, "status": status, "cleanup": cleanup}[a.cmd](a)
+    {"spawn": spawn, "status": status, "wait": wait, "cleanup": cleanup}[a.cmd](a)
 
 
 if __name__ == "__main__":

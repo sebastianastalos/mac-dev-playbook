@@ -9,6 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DB_PATH = Path(os.environ.get("TK_DB", Path.home() / ".local/share/tickets/tickets.db"))
+SHOTS = DB_PATH.parent / "shots"
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 PORT = int(os.environ.get("TK_PORT", "7717"))
 STATUSES = ["backlog", "todo", "working", "needs-you", "review", "done"]
 # cmux lane → board column; lanes not listed leave the ticket alone
@@ -28,6 +30,13 @@ CREATE TABLE IF NOT EXISTS tickets (
   last_lane TEXT,
   created_at REAL NOT NULL, updated_at REAL NOT NULL, closed_at REAL
 );
+CREATE TABLE IF NOT EXISTS shots (
+  id INTEGER PRIMARY KEY,
+  ticket_id INTEGER NOT NULL,
+  file TEXT NOT NULL,
+  caption TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL
+);
 """
 
 
@@ -39,6 +48,10 @@ def db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(tickets)")}
+    for col, kind in (("decision", "TEXT"), ("decision_note", "TEXT"), ("decided_at", "REAL"), ("review", "TEXT")):
+        if col not in have:
+            conn.execute(f"ALTER TABLE tickets ADD COLUMN {col} {kind}")
     return conn
 
 
@@ -60,7 +73,13 @@ def list_tickets(conn, project=None, status=None, include_done=False):
         # keep a week of done tickets so the column isn't empty straight away
         sql += " AND (status != 'done' OR closed_at > ?)"; args.append(time.time() - 7 * 86400)
     sql += " ORDER BY priority, updated_at DESC"
-    return [row(t) for t in conn.execute(sql, args)]
+    tickets = [row(t) for t in conn.execute(sql, args)]
+    shots = {}
+    for sh in conn.execute("SELECT ticket_id, file, caption FROM shots ORDER BY id"):
+        shots.setdefault(sh["ticket_id"], []).append({"url": f"/shots/{sh['ticket_id']}/{sh['file']}", "caption": sh["caption"]})
+    for t in tickets:
+        t["shots"] = shots.get(t["id"], [])
+    return tickets
 
 
 def create(conn, title, project="", body="", status="backlog", priority=2):
@@ -80,6 +99,7 @@ def update(conn, tid, source="manual", **changes):
     t = get(conn, tid)
     if not t:
         raise KeyError(tid)
+    internal = {k: changes.pop(k) for k in ("decision", "decision_note", "decided_at", "review") if k in changes}
     changes = {k: v for k, v in changes.items() if k in FIELDS and v is not None}
     for k in ("workspace_id", "worktree", "branch", "pr_url"):
         if changes.get(k) == "":
@@ -89,6 +109,11 @@ def update(conn, tid, source="manual", **changes):
             raise ValueError(f"unknown status {changes['status']!r}")
         changes["status_source"] = source
         changes["closed_at"] = time.time() if changes["status"] == "done" else None
+        if changes["status"] in ("backlog", "todo", "working", "needs-you"):
+            # back to work: the review decision belonged to the round that ended
+            changes.update(decision=None, decision_note=None, decided_at=None, review=None)
+            clear_shots(conn, tid)  # screenshots belong to the review round that ended
+    changes.update(internal)
     if not changes:
         return t
     changes["updated_at"] = time.time()
@@ -98,7 +123,46 @@ def update(conn, tid, source="manual", **changes):
     return get(conn, tid)
 
 
+def decide(conn, tid, decision, note=""):
+    """Record the user's review decision: approved, changes (sent back) or None to clear."""
+    t = get(conn, tid)
+    if not t:
+        raise KeyError(tid)
+    if decision not in ("approved", "changes", None):
+        raise ValueError(f"unknown decision {decision!r}")
+    if decision and t["status"] != "review":
+        raise ValueError(f"#{tid} is {t['status']}; only tickets in review can be approved or sent back")
+    if decision == "changes" and not (note or "").strip():
+        raise ValueError("say what needs changing")
+    return update(conn, tid, decision=decision, decision_note=(note or "").strip() or None,
+                  decided_at=time.time() if decision else None)
+
+
+def add_shot(conn, tid, src, caption=""):
+    if not get(conn, tid):
+        raise KeyError(tid)
+    src = Path(src).expanduser()
+    if src.suffix.lower() not in IMAGE_TYPES:
+        raise ValueError(f"{src.name}: only {', '.join(IMAGE_TYPES)} images")
+    if not src.is_file() or src.stat().st_size > 15 * 1024 * 1024:
+        raise ValueError(f"{src}: not a file, or over 15 MB")
+    folder = SHOTS / str(tid)
+    folder.mkdir(parents=True, exist_ok=True)
+    n = conn.execute("SELECT COUNT(*) FROM shots WHERE ticket_id = ?", (tid,)).fetchone()[0] + 1
+    name = f"{n:02d}-{re.sub(r'[^a-z0-9]+', '-', (caption or src.stem).lower()).strip('-')[:40].rstrip('-') or 'shot'}{src.suffix.lower()}"
+    shutil.copyfile(src, folder / name)
+    conn.execute("INSERT INTO shots (ticket_id, file, caption, created_at) VALUES (?, ?, ?, ?)", (tid, name, caption, time.time()))
+    conn.commit()
+    return name
+
+
+def clear_shots(conn, tid):
+    conn.execute("DELETE FROM shots WHERE ticket_id = ?", (tid,))
+    shutil.rmtree(SHOTS / str(tid), ignore_errors=True)
+
+
 def delete(conn, tid):
+    clear_shots(conn, tid)
     conn.execute("DELETE FROM tickets WHERE id = ?", (tid,))
     conn.commit()
 
@@ -143,6 +207,10 @@ def sync(conn):
             continue
         conn.execute("UPDATE tickets SET last_lane = ? WHERE id = ?", (lane, t["id"]))
         target = LANES.get(lane)
+        # Review belongs to the user and the conductor: a worker doing a follow-up
+        # (e.g. approved doc edits) must not drag the ticket back or wipe the decision.
+        if t["status"] == "review" and target != "done":
+            continue
         if target and target != t["status"]:
             update(conn, t["id"], source="auto", status=target)
             moved.append({"id": t["id"], "from": t["status"], "to": target})
@@ -176,7 +244,8 @@ def print_tickets(tickets):
         print(f"\n{status.upper()} ({len(group)})")
         for t in group:
             extra = " · ".join(x for x in [t["project"], t["branch"] and f"⎇ {t['branch']}", t["pr_url"] and "PR"] if x)
-            print(f"  #{t['id']:<4} {'!' * (4 - t['priority'])} {t['title']}  [{extra}] {ago(t['updated_at'])}")
+            mark = {"approved": " ✓ approved", "changes": " ↩ sent back"}.get(t["decision"], "")
+            print(f"  #{t['id']:<4} {'!' * (4 - t['priority'])} {t['title']}{mark}  [{extra}] {ago(t['updated_at'])}")
 
 
 # --- web board -------------------------------------------------------------------
@@ -200,7 +269,15 @@ main{display:grid;grid-template-columns:repeat(6,minmax(200px,1fr));gap:10px;pad
 .card{background:var(--card);border:1px solid var(--edge);border-radius:8px;padding:8px 9px;cursor:grab}.card:hover{background:var(--cardHover)}
 .card .t{font-weight:600}.card .m{color:var(--dim);font-size:11.5px;margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .chip{border:1px solid var(--edge);border-radius:5px;padding:0 5px}.p1{color:var(--red)}.p3{opacity:.7}
-.card a{color:var(--green);text-decoration:none}.add input{width:100%}
+.card a{color:var(--green);text-decoration:none}
+.acts{display:flex;gap:6px;margin-top:8px}.acts button{padding:3px 9px;font-size:12px}.approve{color:var(--green);border-color:#7ec69966}.back{color:var(--amber)}
+#rv{width:min(720px,94vw)}#rv h3{margin:0 0 2px;font-size:16px}#rv .meta{color:var(--dim);font-size:12px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap}
+#rv h4{margin:14px 0 4px;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}#rv .md{line-height:1.5}#rv .md ul{margin:4px 0;padding-left:18px}
+#rv .md code{background:var(--card);border:1px solid var(--edge);border-radius:4px;padding:0 4px;font-size:12px}#rv .md h5{margin:12px 0 4px;font-size:13px}
+#rv .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}#rv figure{margin:0}
+#rv figure img{width:100%;border-radius:8px;border:1px solid var(--edge);display:block;cursor:zoom-in}#rv figcaption{font-size:11.5px;color:var(--dim);margin-top:4px}
+#rv .wait{color:var(--dim);font-style:italic}#rv .actions a{color:var(--dim);align-self:center;cursor:pointer}
+.verdict{margin-top:7px;font-size:12px;border-radius:6px;padding:4px 7px;border:1px solid var(--edge)}.verdict.ok{color:var(--green)}.verdict.chg{color:var(--amber)}.add input{width:100%}
 dialog{background:var(--bg);color:var(--text);border:1px solid var(--edge);border-radius:12px;width:min(520px,92vw);padding:16px}
 dialog::backdrop{background:#0008}dialog label{display:block;font-size:11.5px;color:var(--dim);margin:8px 0 3px}dialog input,dialog textarea,dialog select{width:100%}
 dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>*{flex:1}.actions{display:flex;gap:8px;margin-top:14px}.danger{color:var(--red)}
@@ -210,6 +287,10 @@ dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>
 <span class="muted" id="count"></span><span class="spacer"></span><button id="sync" title="Pull status from cmux">Sync</button></header>
 <main id="board"></main>
 <datalist id="projects"></datalist>
+<dialog id="rv"><form method="dialog"><div class="body"></div><div class="actions acts2"></div></form></dialog>
+<dialog id="back"><form method="dialog" id="backform"><label>What needs changing?</label>
+<textarea name="note" placeholder="The worker gets this as its next instruction"></textarea>
+<div class="actions"><button value="send">Send back</button><button value="cancel" formnovalidate>Cancel</button></div></form></dialog>
 <dialog id="edit"><form method="dialog" id="form">
 <label>Title</label><input name="title" required>
 <div class="row"><div><label>Project</label><input name="project" list="projects"></div>
@@ -242,9 +323,42 @@ function render(){
     ${id==="backlog"||id==="todo"?`<form class="add" data-status="${id}"><input placeholder="+ Add ticket" name="title"></form>`:""}
     ${items.map(t=>`<article class="card" draggable="true" data-id="${t.id}"><div class="t">${esc(t.title)}</div>
     <div class="m"><span>#${t.id}</span>${t.priority==1?'<span class="p1">● high</span>':""}${t.project?`<span class="chip">${esc(t.project)}</span>`:""}
-    ${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">PR</a>`:""}<span>${ago(t.updated_at)}</span></div></article>`).join("")}</section>`}).join("");
+    ${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">PR</a>`:""}${(t.shots||[]).length?`<span title="screenshots">▣ ${t.shots.length}</span>`:""}<span>${ago(t.updated_at)}</span></div>${verdict(t)}</article>`).join("")}</section>`}).join("");
 }
-async function load(){if(dragging||editing)return;try{tickets=await api("GET","/api/tickets");render()}catch(e){}}
+function verdict(t){
+  if(t.status!=="review")return "";
+  if(t.decision==="approved")return `<div class="verdict ok">✓ Approved${t.pr_url?"":" – conductor will push and open the PR"}</div>`;
+  if(t.decision==="changes")return `<div class="verdict chg">↩ Sent back: ${esc(t.decision_note)}</div>`;
+  if(!t.review)return `<div class="verdict">⏳ Conductor is reviewing</div>`;
+  return `<div class="acts"><button class="approve" data-act="approve">Approve</button><button class="back" data-act="back">Send back</button></div>`;
+}
+function md(src){
+  const inline=s=>esc(s).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+  let out="",list=false;
+  for(const raw of String(src||"").split("\n")){const l=raw.trimEnd();
+    const li=l.match(/^\s*[-*•]\s+(.*)/);
+    if(li){if(!list){out+="<ul>";list=true}out+=`<li>${inline(li[1])}</li>`;continue}
+    if(list){out+="</ul>";list=false}
+    const h=l.match(/^#{1,6}\s+(.*)/);
+    if(h)out+=`<h5>${inline(h[1])}</h5>`;else if(l.trim())out+=`<p style="margin:4px 0">${inline(l)}</p>`;
+  }
+  return out+(list?"</ul>":"");
+}
+function goal(body){const m=String(body||"").match(/##\s*Goal\s*\n([\s\S]*?)(\n##\s|$)/);
+  return (m?m[1]:String(body||"").slice(0,400)).trim()||"(no brief)"}
+let reviewing=null;
+function openReview(t){reviewing=t;const rv=$("#rv");
+  rv.querySelector(".body").innerHTML=`<h3>#${t.id} ${esc(t.title)}</h3>
+  <div class="meta">${t.project?`<span class="chip">${esc(t.project)}</span>`:""}${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">PR</a>`:""}</div>
+  <h4>Asked for</h4><div class="md">${md(goal(t.body))}</div>
+  ${t.review?`<div class="md">${md(t.review)}</div>`:`<h4>Review</h4><p class="wait">Waiting for the conductor's review.</p>`}
+  ${(t.shots||[]).length?`<h4>Screenshots</h4><div class="shots">${t.shots.map(s=>`<figure><a href="${esc(s.url)}" target="_blank"><img src="${esc(s.url)}" alt="${esc(s.caption)}" loading="lazy"></a>${s.caption?`<figcaption>${esc(s.caption)}</figcaption>`:""}</figure>`).join("")}</div>`:""}
+  ${t.decision==="approved"?`<div class="verdict ok">✓ Approved${t.pr_url?"":" – conductor will push and open the PR"}</div>`:""}
+  ${t.decision==="changes"?`<div class="verdict chg">↩ Sent back: ${esc(t.decision_note)}</div>`:""}`;
+  rv.querySelector(".acts2").innerHTML=(t.review&&!t.decision?`<button class="approve" value="approve">Approve</button><button class="back" value="back">Send back…</button>`:"")+
+    `<button value="close" autofocus>Close</button><span class="spacer"></span><a data-edit>Edit ticket ›</a>`;
+  rv.showModal()}
+async function load(){if(dragging||editing||backing||reviewing)return;try{tickets=await api("GET","/api/tickets");render()}catch(e){}}
 $("#project").onchange=()=>{try{localStorage.setItem("tk.project",$("#project").value)}catch(e){}render()};
 $("#sync").onclick=async()=>{await api("POST","/api/sync");load()};
 document.addEventListener("submit",async e=>{const f=e.target;if(!f.classList.contains("add"))return;e.preventDefault();
@@ -256,8 +370,23 @@ document.addEventListener("drop",async e=>{const col=e.target.closest(".col");if
   const t=tickets.find(x=>x.id==id);if(t)t.status=col.dataset.status;render();await api("PATCH","/api/tickets/"+id,{status:col.dataset.status});load()});
 const dlg=$("#edit"),form=$("#form");
 form.status.innerHTML=COLS.map(([id,name])=>`<option value="${id}">${name}</option>`).join("");
-document.addEventListener("click",e=>{const c=e.target.closest(".card");if(!c||e.target.closest("a"))return;
-  const t=tickets.find(x=>x.id==c.dataset.id);editing=t;for(const k of["title","project","priority","status","body","branch","pr_url","worktree","workspace_id"])form[k].value=t[k]??"";dlg.showModal()});
+const backDlg=$("#back"),backForm=$("#backform");let backing=null;
+document.addEventListener("click",async e=>{const b=e.target.closest("button[data-act]");if(!b)return;e.stopPropagation();
+  const id=b.closest(".card").dataset.id;
+  if(b.dataset.act==="approve"){await api("POST",`/api/tickets/${id}/decision`,{decision:"approved"});load()}
+  else{backing=id;backForm.note.value="";backDlg.showModal()}},true);
+backDlg.addEventListener("close",async()=>{const id=backing;backing=null;
+  if(id&&backDlg.returnValue==="send"&&backForm.note.value.trim()){await api("POST",`/api/tickets/${id}/decision`,{decision:"changes",note:backForm.note.value});}
+  load()});
+function openEdit(t){editing=t;for(const k of["title","project","priority","status","body","branch","pr_url","worktree","workspace_id"])form[k].value=t[k]??"";dlg.showModal()}
+const rvDlg=$("#rv");
+rvDlg.addEventListener("click",e=>{if(e.target.closest("[data-edit]")){const t=reviewing;rvDlg.close("edit");openEdit(t)}});
+rvDlg.addEventListener("close",async()=>{const t=reviewing;reviewing=null;if(!t)return;
+  if(rvDlg.returnValue==="approve"){await api("POST",`/api/tickets/${t.id}/decision`,{decision:"approved"})}
+  else if(rvDlg.returnValue==="back"){backing=String(t.id);backForm.note.value="";backDlg.showModal();return}
+  load()});
+document.addEventListener("click",e=>{const c=e.target.closest(".card");if(!c||e.target.closest("a,button"))return;
+  const t=tickets.find(x=>x.id==c.dataset.id);if(t.status==="review"||(t.status==="done"&&t.review)){openReview(t);return}editing=t;for(const k of["title","project","priority","status","body","branch","pr_url","worktree","workspace_id"])form[k].value=t[k]??"";dlg.showModal()});
 dlg.addEventListener("close",async()=>{const t=editing;editing=null;if(!t)return;
   if(dlg.returnValue==="delete"){await api("DELETE","/api/tickets/"+t.id)}
   else if(dlg.returnValue==="save"){const d=Object.fromEntries(new FormData(form));d.priority=+d.priority;await api("PATCH","/api/tickets/"+t.id,d)}
@@ -273,7 +402,7 @@ class Board(BaseHTTPRequestHandler):
         pass
 
     def _send(self, code, payload=None, ctype="application/json"):
-        body = payload.encode() if isinstance(payload, str) else json.dumps(payload).encode()
+        body = payload if isinstance(payload, bytes) else payload.encode() if isinstance(payload, str) else json.dumps(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -302,6 +431,12 @@ class Board(BaseHTTPRequestHandler):
         try:
             if method == "GET" and path == "/":
                 return self._send(200, PAGE, "text/html; charset=utf-8")
+            img = re.fullmatch(r"/shots/(\d+)/([a-z0-9-]+\.(?:png|jpe?g|webp))", path)
+            if method == "GET" and img:
+                f = SHOTS / img[1] / img[2]
+                if not f.is_file():
+                    return self._send(404, {"error": "no such screenshot"})
+                return self._send(200, f.read_bytes(), IMAGE_TYPES[f.suffix])
             if method == "GET" and path == "/api/tickets":
                 return self._send(200, list_tickets(conn))
             if method == "POST" and path == "/api/tickets":
@@ -315,6 +450,10 @@ class Board(BaseHTTPRequestHandler):
             m = re.fullmatch(r"/api/tickets/(\d+)", path)
             if m and method == "PATCH":
                 return self._send(200, update(conn, int(m[1]), **self._json()))
+            d = re.fullmatch(r"/api/tickets/(\d+)/decision", path)
+            if d and method == "POST":
+                body = self._json()
+                return self._send(200, decide(conn, int(d[1]), body.get("decision"), body.get("note", "")))
             if m and method == "DELETE":
                 delete(conn, int(m[1]))
                 return self._send(200, {"deleted": int(m[1])})
@@ -379,6 +518,15 @@ def main():
     p.add_argument("id", type=int); p.add_argument("--workspace", help="workspace UUID, or 'here'")
     p.add_argument("--worktree"); p.add_argument("--branch"); p.add_argument("--pr")
 
+    p = sub.add_parser("approve", help="approve a ticket in review"); p.add_argument("id", type=int); p.add_argument("-m", "--note", default="")
+    p = sub.add_parser("send-back", help="send a ticket in review back with changes"); p.add_argument("id", type=int); p.add_argument("-m", "--note", required=True)
+    p = sub.add_parser("review", help="attach the conductor's review report (markdown)")
+    p.add_argument("id", type=int); g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("-m", "--text"); g.add_argument("-f", "--file", help="file, or - for stdin")
+    p = sub.add_parser("undecide", help="clear a review decision"); p.add_argument("id", type=int)
+    p = sub.add_parser("shot", help="attach a screenshot to a ticket's review (png/jpg/webp)")
+    p.add_argument("id", type=int); p.add_argument("image", nargs="?"); p.add_argument("-c", "--caption", default="")
+    p.add_argument("--clear", action="store_true", help="remove this ticket's screenshots")
     p = sub.add_parser("done", help="mark done"); p.add_argument("id", type=int)
     p = sub.add_parser("rm", help="delete a ticket"); p.add_argument("id", type=int)
     p = sub.add_parser("sync", help="pull status from cmux"); p.add_argument("--json", action="store_true")
@@ -400,11 +548,13 @@ def main():
             if a.json:
                 print(json.dumps(t))
             else:
-                for k in ["id", "title", "project", "status", "priority", "branch", "worktree", "workspace_id", "pr_url"]:
+                for k in ["id", "title", "project", "status", "decision", "decision_note", "priority", "branch", "worktree", "workspace_id", "pr_url"]:
                     if t[k] not in (None, ""):
                         print(f"{k:>13}: {t[k]}")
                 if t["body"]:
                     print("\n" + t["body"])
+                if t.get("review"):
+                    print("\n--- review ---\n" + t["review"])
         elif a.cmd == "mv":
             t = update(conn, a.id, status=a.status); print(f"#{t['id']} → {t['status']}")
         elif a.cmd == "edit":
@@ -415,6 +565,25 @@ def main():
                 sys.exit("Not inside a cmux workspace")
             t = update(conn, a.id, workspace_id=ws, worktree=a.worktree and str(Path(a.worktree).resolve()), branch=a.branch, pr_url=a.pr)
             print(f"Linked #{t['id']}")
+        elif a.cmd == "approve":
+            decide(conn, a.id, "approved", a.note); print(f"#{a.id} approved")
+        elif a.cmd == "send-back":
+            decide(conn, a.id, "changes", a.note); print(f"#{a.id} sent back")
+        elif a.cmd == "review":
+            text = a.text if a.text is not None else (sys.stdin.read() if a.file == "-" else Path(a.file).read_text())
+            if (get(conn, a.id) or {}).get("status") != "review":
+                sys.exit(f"#{a.id} isn't in review")
+            update(conn, a.id, review=text.strip()); print(f"Review attached to #{a.id}")
+        elif a.cmd == "shot":
+            if a.clear:
+                clear_shots(conn, a.id); conn.commit(); print(f"Cleared screenshots of #{a.id}")
+            elif a.image:
+                img = a.image[7:] if a.image.startswith("file://") else a.image
+                print(f"Attached {add_shot(conn, a.id, img, a.caption)} to #{a.id}")
+            else:
+                sys.exit("give an image path, or --clear")
+        elif a.cmd == "undecide":
+            decide(conn, a.id, None); print(f"#{a.id} decision cleared")
         elif a.cmd == "done":
             t = update(conn, a.id, status="done"); print(f"#{t['id']} done")
         elif a.cmd == "rm":

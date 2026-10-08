@@ -45,6 +45,8 @@ For each candidate ticket:
 <links, error text, decisions already made>
 ```
 
+For tickets that change what a page looks like, include a browser check in "Done when" when the project notes describe a way to preview a worktree (cmux browser + screenshots), and do the same check yourself at review.
+
 Then show the user the plan – tickets, repo, base branch, one line per brief – and wait for approval. Do not spawn before they say go.
 
 ## 3. Spawn
@@ -63,6 +65,8 @@ If the output says `"waiting_on_folder_trust": true`, Claude Code is asking whet
 
 ## 4. Keep track
 
+Run `conductor wait` in the background (Bash `run_in_background`) whenever workers are running or a ticket is in Review; it returns when a worker needs the user, finishes, or the user decides a review on the board. Handle the event, then start it again.
+
 - `conductor status` – column, cmux lane, commit count per worker. The board and the cmux sidebar show the same.
 - Needs you (amber): tell the user which worker is waiting and on what (read its screen via the cmux skills). Don't answer a worker's question yourself unless the user tells you to.
 - A worker that finishes moves its ticket to Review.
@@ -74,7 +78,11 @@ Without git (`--dir` / scratch) there's no branch or PR: review the files the wo
 For git:
 
 1. Review the work: `git -C <worktree> log --oneline <base>..HEAD` and the diff. Run the "Done when" checks yourself. For anything non-trivial, have a separate reviewer subagent read the diff against the brief.
-2. Report to the user: what changed, check results, review findings. Send fixes back to the same worker (it's still open in its workspace) rather than editing its worktree yourself.
+2. Attach the review to the ticket so the user can decide on the board: `tk review <id> -f - <<'EOF' … EOF` (markdown). Sections: `#### What was done` (with check results and size in the heading line), `#### Decisions to confirm`, `#### Doc edits included if you approve` (when any), `#### Not checked`. Keep it to bullets – the board shows the brief's Goal above it. The Approve button only appears once a review is attached. Attach the screenshots you took with `tk shot <id> <png or file:// path> -c "<what it shows>"` – they appear in the board's review panel; a send-back clears them with the review.
+   Report to the user: what changed, check results, review findings. Send fixes back to the same worker (it's still open in its workspace) rather than editing its worktree yourself.
+   The user decides either in the chat or on the board (Approve / Send back on Review cards). Record a chat decision on the board too: `tk approve <id>` or `tk send-back <id> -m "<what to change>"`.
+   - **Sent back** (`decision: changes`): pass the note to the worker as one line – `cmux send --workspace <workspace_id> "<note>"`, then `cmux send-key --workspace <workspace_id> --force enter` (a trailing `\n` does not submit Claude Code's prompt). Read the screen a few seconds later to confirm it started working – then `tk mv <id> working`, which clears the decision for the next round.
+   - **Approved** (`decision: approved`): continue with step 3. Approval covers push + PR only; merge and deploy still need the user to say so in the chat.
 3. Only on the user's approval: push the branch and open a PR (`gh pr create` from the worktree), then `tk link <id> --pr <url>`. Use the right GitHub identity for the repo: personal repos (owner `sebastianastalos`) need `gh auth switch --user sebastianastalos` before pushing and `gh auth switch --user sebastianHST` straight after; commits must be authored by that repo's configured identity and carry no Co-Authored-By trailer.
 4. When the PR is merged the ticket moves to Done by itself (via cmux). Then offer clean-up; on approval run `conductor cleanup <id>` (removes the worktree and local branch, closes the workspace). It refuses if the ticket isn't Done or the worktree has uncommitted changes – surface that rather than adding `--force`.
 
