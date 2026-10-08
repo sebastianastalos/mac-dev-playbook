@@ -1,0 +1,5 @@
+---
+- name: Restart tickets board
+  ansible.builtin.command: launchctl kickstart -k gui/{{ ansible_facts['user_uid'] }}/local.tickets
+  changed_when: true
+  failed_when: false

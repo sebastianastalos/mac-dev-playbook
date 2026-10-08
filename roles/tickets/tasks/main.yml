@@ -1,0 +1,42 @@
+---
+# tk: local ticket board (CLI + web board on 127.0.0.1:7717), kept running by launchd.
+# Status sync from cmux runs via Claude Code hooks (see claude_code role).
+
+- name: Create tickets data directory
+  ansible.builtin.file:
+    path: "{{ tickets_home }}/.local/share/tickets"
+    state: directory
+    mode: "0755"
+
+- name: Install tk
+  ansible.builtin.copy:
+    src: tk
+    dest: "{{ tickets_home }}/.local/bin/tk"
+    mode: "0755"
+  notify: Restart tickets board
+
+- name: Install tickets board launch agent
+  ansible.builtin.template:
+    src: local.tickets.plist.j2
+    dest: "{{ tickets_home }}/Library/LaunchAgents/local.tickets.plist"
+    mode: "0644"
+  register: tickets_plist
+
+- name: Check whether the tickets board is loaded
+  ansible.builtin.command: launchctl print gui/{{ ansible_facts['user_uid'] }}/local.tickets
+  register: tickets_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Unload outdated tickets board
+  ansible.builtin.command: launchctl bootout gui/{{ ansible_facts['user_uid'] }}/local.tickets
+  when: tickets_plist.changed and tickets_loaded.rc == 0
+  changed_when: true
+
+- name: Load tickets board
+  ansible.builtin.command: >-
+    launchctl bootstrap gui/{{ ansible_facts['user_uid'] }}
+    {{ tickets_home }}/Library/LaunchAgents/local.tickets.plist
+  when: tickets_plist.changed or tickets_loaded.rc != 0
+  changed_when: true

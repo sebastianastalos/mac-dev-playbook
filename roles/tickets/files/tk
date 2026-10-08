@@ -1,0 +1,439 @@
+#!/usr/bin/env python3
+"""tk – local ticket board shared by every project, linked to cmux workspaces.
+
+Data lives in ~/.local/share/tickets/tickets.db. `tk serve` runs the web board
+on http://127.0.0.1:7717; `tk --help` lists the commands.
+"""
+import argparse, json, os, re, shutil, sqlite3, subprocess, sys, threading, time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+DB_PATH = Path(os.environ.get("TK_DB", Path.home() / ".local/share/tickets/tickets.db"))
+PORT = int(os.environ.get("TK_PORT", "7717"))
+STATUSES = ["backlog", "todo", "working", "needs-you", "review", "done"]
+# cmux lane → board column; lanes not listed leave the ticket alone
+LANES = {"working": "working", "needs-attention": "needs-you", "review": "review", "done": "done"}
+FIELDS = ["title", "body", "project", "status", "priority", "workspace_id", "worktree", "branch", "pr_url"]
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS tickets (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  project TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'backlog',
+  priority INTEGER NOT NULL DEFAULT 2,
+  workspace_id TEXT, worktree TEXT, branch TEXT, pr_url TEXT,
+  status_source TEXT NOT NULL DEFAULT 'manual',
+  last_lane TEXT,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL, closed_at REAL
+);
+"""
+
+
+# --- storage -------------------------------------------------------------------
+
+def db():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript(SCHEMA)
+    return conn
+
+
+def row(t):
+    return dict(t) if t else None
+
+
+def get(conn, tid):
+    return row(conn.execute("SELECT * FROM tickets WHERE id = ?", (tid,)).fetchone())
+
+
+def list_tickets(conn, project=None, status=None, include_done=False):
+    sql, args = "SELECT * FROM tickets WHERE 1=1", []
+    if project:
+        sql += " AND project = ?"; args.append(project)
+    if status:
+        sql += " AND status = ?"; args.append(status)
+    elif not include_done:
+        # keep a week of done tickets so the column isn't empty straight away
+        sql += " AND (status != 'done' OR closed_at > ?)"; args.append(time.time() - 7 * 86400)
+    sql += " ORDER BY priority, updated_at DESC"
+    return [row(t) for t in conn.execute(sql, args)]
+
+
+def create(conn, title, project="", body="", status="backlog", priority=2):
+    if status not in STATUSES:
+        raise ValueError(f"unknown status {status!r}")
+    now = time.time()
+    cur = conn.execute(
+        "INSERT INTO tickets (title, body, project, status, priority, created_at, updated_at, closed_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (title.strip(), body, project, status, int(priority), now, now, now if status == "done" else None),
+    )
+    conn.commit()
+    return get(conn, cur.lastrowid)
+
+
+def update(conn, tid, source="manual", **changes):
+    t = get(conn, tid)
+    if not t:
+        raise KeyError(tid)
+    changes = {k: v for k, v in changes.items() if k in FIELDS and v is not None}
+    for k in ("workspace_id", "worktree", "branch", "pr_url"):
+        if changes.get(k) == "":
+            changes[k] = None  # clearing a link
+    if "status" in changes:
+        if changes["status"] not in STATUSES:
+            raise ValueError(f"unknown status {changes['status']!r}")
+        changes["status_source"] = source
+        changes["closed_at"] = time.time() if changes["status"] == "done" else None
+    if not changes:
+        return t
+    changes["updated_at"] = time.time()
+    cols = ", ".join(f"{k} = ?" for k in changes)
+    conn.execute(f"UPDATE tickets SET {cols} WHERE id = ?", (*changes.values(), tid))
+    conn.commit()
+    return get(conn, tid)
+
+
+def delete(conn, tid):
+    conn.execute("DELETE FROM tickets WHERE id = ?", (tid,))
+    conn.commit()
+
+
+# --- cmux sync -------------------------------------------------------------------
+
+def cmux_bin():
+    return os.environ.get("CMUX_BUNDLED_CLI_PATH") or shutil.which("cmux") or "/Applications/cmux.app/Contents/Resources/bin/cmux"
+
+
+_warned = False
+
+
+def cmux_lane(workspace_id):
+    """The board column a workspace's cmux lane maps to, or None when unknown."""
+    try:
+        out = subprocess.run(
+            [cmux_bin(), "workspace", "status", "--workspace", workspace_id, "--json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            global _warned
+            if not _warned:  # outside cmux (e.g. launchd) access is refused; say so once
+                print(f"cmux status unavailable: {out.stderr.strip()[:200]}", file=sys.stderr)
+                _warned = True
+            return None
+        s = json.loads(out.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+    sig = s.get("signals") or {}
+    if sig.get("has_pull_requests") and sig.get("all_pull_requests_merged_or_closed"):
+        return "done"
+    return s.get("effective")
+
+
+def sync(conn):
+    """Move linked tickets when their cmux lane changes; manual moves stick until it changes again."""
+    moved = []
+    for t in conn.execute("SELECT * FROM tickets WHERE workspace_id IS NOT NULL AND status != 'done'").fetchall():
+        lane = cmux_lane(t["workspace_id"])
+        if lane is None or lane == t["last_lane"]:
+            continue
+        conn.execute("UPDATE tickets SET last_lane = ? WHERE id = ?", (lane, t["id"]))
+        target = LANES.get(lane)
+        if target and target != t["status"]:
+            update(conn, t["id"], source="auto", status=target)
+            moved.append({"id": t["id"], "from": t["status"], "to": target})
+    conn.commit()
+    return moved
+
+
+# --- helpers ---------------------------------------------------------------------
+
+def current_project():
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=2).stdout.strip()
+    except OSError:
+        top = ""
+    return Path(top or os.getcwd()).name
+
+
+def ago(ts):
+    m = int((time.time() - ts) // 60)
+    return f"{m}m" if m < 60 else f"{m // 60}h" if m < 1440 else f"{m // 1440}d"
+
+
+def print_tickets(tickets):
+    if not tickets:
+        print("No tickets.")
+        return
+    for status in STATUSES:
+        group = [t for t in tickets if t["status"] == status]
+        if not group:
+            continue
+        print(f"\n{status.upper()} ({len(group)})")
+        for t in group:
+            extra = " · ".join(x for x in [t["project"], t["branch"] and f"⎇ {t['branch']}", t["pr_url"] and "PR"] if x)
+            print(f"  #{t['id']:<4} {'!' * (4 - t['priority'])} {t['title']}  [{extra}] {ago(t['updated_at'])}")
+
+
+# --- web board -------------------------------------------------------------------
+
+PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tickets</title>
+<style>
+:root{--bg:#1c1c1e;--col:#ffffff0a;--card:#ffffff12;--cardHover:#ffffff1c;--edge:#ffffff14;--text:#e4e4e4;--dim:#8a8a8a;
+--orange:#d97757;--amber:#e5b567;--green:#7ec699;--red:#ff6b6b;--purple:#b48ead;--blue:#5fafff}
+@media (prefers-color-scheme: light){:root:not([data-theme=dark]){--bg:#f4f4f5;--col:#0000000a;--card:#ffffff;--cardHover:#fafafa;--edge:#00000014;--text:#1c1c1e;--dim:#6b6b6b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}
+header{display:flex;gap:10px;align-items:center;padding:12px 16px;position:sticky;top:0;background:var(--bg);z-index:2}
+h1{font-size:15px;margin:0 8px 0 0}select,input,textarea,button{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--edge);border-radius:7px;padding:5px 8px}
+button{cursor:pointer}button:hover{background:var(--cardHover)}.spacer{flex:1}.muted{color:var(--dim)}
+main{display:grid;grid-template-columns:repeat(6,minmax(200px,1fr));gap:10px;padding:0 16px 16px;overflow-x:auto;min-height:calc(100vh - 56px)}
+.col{background:var(--col);border:1px solid var(--edge);border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:200px}
+.col.over{outline:2px solid #ffffff40}.col h2{font-size:12px;margin:2px 4px 6px;display:flex;gap:6px;align-items:center;text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.card{background:var(--card);border:1px solid var(--edge);border-radius:8px;padding:8px 9px;cursor:grab}.card:hover{background:var(--cardHover)}
+.card .t{font-weight:600}.card .m{color:var(--dim);font-size:11.5px;margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{border:1px solid var(--edge);border-radius:5px;padding:0 5px}.p1{color:var(--red)}.p3{opacity:.7}
+.card a{color:var(--green);text-decoration:none}.add input{width:100%}
+dialog{background:var(--bg);color:var(--text);border:1px solid var(--edge);border-radius:12px;width:min(520px,92vw);padding:16px}
+dialog::backdrop{background:#0008}dialog label{display:block;font-size:11.5px;color:var(--dim);margin:8px 0 3px}dialog input,dialog textarea,dialog select{width:100%}
+dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>*{flex:1}.actions{display:flex;gap:8px;margin-top:14px}.danger{color:var(--red)}
+@media (max-width:700px){main{grid-template-columns:repeat(6,82vw)}}
+</style></head><body>
+<header><h1>Tickets</h1><select id="project"><option value="">All projects</option></select>
+<span class="muted" id="count"></span><span class="spacer"></span><button id="sync" title="Pull status from cmux">Sync</button></header>
+<main id="board"></main>
+<datalist id="projects"></datalist>
+<dialog id="edit"><form method="dialog" id="form">
+<label>Title</label><input name="title" required>
+<div class="row"><div><label>Project</label><input name="project" list="projects"></div>
+<div><label>Priority</label><select name="priority"><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></div>
+<div><label>Status</label><select name="status"></select></div></div>
+<label>Details</label><textarea name="body"></textarea>
+<div class="row"><div><label>Branch</label><input name="branch"></div><div><label>PR URL</label><input name="pr_url"></div></div>
+<label>Worktree</label><input name="worktree"><label>cmux workspace</label><input name="workspace_id">
+<div class="actions"><button value="save">Save</button><button value="cancel" formnovalidate>Cancel</button><span class="spacer"></span><button value="delete" class="danger" formnovalidate>Delete</button></div>
+</form></dialog>
+<script>
+const COLS=[["backlog","Backlog","var(--dim)"],["todo","Todo","var(--blue)"],["working","Working","var(--orange)"],["needs-you","Needs you","var(--amber)"],["review","Review","var(--purple)"],["done","Done","var(--green)"]];
+const H={"Content-Type":"application/json","X-Tickets":"1"};
+let tickets=[],dragging=null,editing=null;
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api=(m,u,b)=>fetch(u,{method:m,headers:H,body:b&&JSON.stringify(b)}).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
+const ago=t=>{const m=Math.floor((Date.now()/1e3-t)/60);return m<60?m+"m":m<1440?Math.floor(m/60)+"h":Math.floor(m/1440)+"d"};
+try{const p=localStorage.getItem("tk.project");if(p!==null)$("#project").dataset.want=p}catch(e){}
+function render(){
+  const proj=$("#project").value,shown=tickets.filter(t=>!proj||t.project===proj);
+  const projects=[...new Set(tickets.map(t=>t.project).filter(Boolean))].sort();
+  const sel=$("#project"),want=sel.dataset.want??sel.value;
+  sel.innerHTML='<option value="">All projects</option>'+projects.map(p=>`<option>${esc(p)}</option>`).join("");
+  sel.value=projects.includes(want)?want:"";delete sel.dataset.want;
+  $("#projects").innerHTML=projects.map(p=>`<option value="${esc(p)}">`).join("");
+  $("#count").textContent=`${shown.filter(t=>t.status!=="done").length} open`;
+  $("#board").innerHTML=COLS.map(([id,name,color])=>{
+    const items=shown.filter(t=>t.status===id);
+    return `<section class="col" data-status="${id}"><h2><span class="dot" style="background:${color}"></span>${name}<span class="spacer"></span>${items.length}</h2>
+    ${id==="backlog"||id==="todo"?`<form class="add" data-status="${id}"><input placeholder="+ Add ticket" name="title"></form>`:""}
+    ${items.map(t=>`<article class="card" draggable="true" data-id="${t.id}"><div class="t">${esc(t.title)}</div>
+    <div class="m"><span>#${t.id}</span>${t.priority==1?'<span class="p1">● high</span>':""}${t.project?`<span class="chip">${esc(t.project)}</span>`:""}
+    ${t.branch?`<span>⎇ ${esc(t.branch)}</span>`:""}${t.pr_url?`<a href="${esc(t.pr_url)}" target="_blank">PR</a>`:""}<span>${ago(t.updated_at)}</span></div></article>`).join("")}</section>`}).join("");
+}
+async function load(){if(dragging||editing)return;try{tickets=await api("GET","/api/tickets");render()}catch(e){}}
+$("#project").onchange=()=>{try{localStorage.setItem("tk.project",$("#project").value)}catch(e){}render()};
+$("#sync").onclick=async()=>{await api("POST","/api/sync");load()};
+document.addEventListener("submit",async e=>{const f=e.target;if(!f.classList.contains("add"))return;e.preventDefault();
+  const title=f.title.value.trim();if(!title)return;await api("POST","/api/tickets",{title,status:f.dataset.status,project:$("#project").value});f.reset();load()});
+document.addEventListener("dragstart",e=>{const c=e.target.closest(".card");if(c){dragging=c.dataset.id;e.dataTransfer.setData("text/plain",dragging)}});
+document.addEventListener("dragend",()=>{dragging=null;document.querySelectorAll(".over").forEach(x=>x.classList.remove("over"))});
+document.addEventListener("dragover",e=>{const col=e.target.closest(".col");if(col&&dragging){e.preventDefault();document.querySelectorAll(".over").forEach(x=>x!==col&&x.classList.remove("over"));col.classList.add("over")}});
+document.addEventListener("drop",async e=>{const col=e.target.closest(".col");if(!col||!dragging)return;e.preventDefault();const id=dragging;dragging=null;
+  const t=tickets.find(x=>x.id==id);if(t)t.status=col.dataset.status;render();await api("PATCH","/api/tickets/"+id,{status:col.dataset.status});load()});
+const dlg=$("#edit"),form=$("#form");
+form.status.innerHTML=COLS.map(([id,name])=>`<option value="${id}">${name}</option>`).join("");
+document.addEventListener("click",e=>{const c=e.target.closest(".card");if(!c||e.target.closest("a"))return;
+  const t=tickets.find(x=>x.id==c.dataset.id);editing=t;for(const k of["title","project","priority","status","body","branch","pr_url","worktree","workspace_id"])form[k].value=t[k]??"";dlg.showModal()});
+dlg.addEventListener("close",async()=>{const t=editing;editing=null;if(!t)return;
+  if(dlg.returnValue==="delete"){await api("DELETE","/api/tickets/"+t.id)}
+  else if(dlg.returnValue==="save"){const d=Object.fromEntries(new FormData(form));d.priority=+d.priority;await api("PATCH","/api/tickets/"+t.id,d)}
+  load()});
+load();setInterval(load,4000);
+</script></body></html>"""
+
+
+class Board(BaseHTTPRequestHandler):
+    server_version = "tk"
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, code, payload=None, ctype="application/json"):
+        body = payload.encode() if isinstance(payload, str) else json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _allowed(self, mutating):
+        # Only answer for our own host (blocks DNS rebinding); writes need a custom
+        # header, which a cross-site page can't send without a CORS preflight we refuse.
+        host = self.headers.get("Host", "")
+        if host not in (f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"):
+            return False
+        return not mutating or self.headers.get("X-Tickets") == "1"
+
+    def _json(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(n) or b"{}")
+
+    def _route(self, method):
+        mutating = method != "GET"
+        if not self._allowed(mutating):
+            return self._send(403, {"error": "forbidden"})
+        path = self.path.split("?")[0]
+        conn = db()
+        try:
+            if method == "GET" and path == "/":
+                return self._send(200, PAGE, "text/html; charset=utf-8")
+            if method == "GET" and path == "/api/tickets":
+                return self._send(200, list_tickets(conn))
+            if method == "POST" and path == "/api/tickets":
+                d = self._json()
+                if not str(d.get("title", "")).strip():
+                    return self._send(400, {"error": "title required"})
+                return self._send(201, create(conn, d["title"], d.get("project", ""), d.get("body", ""),
+                                              d.get("status", "backlog"), d.get("priority", 2)))
+            if method == "POST" and path == "/api/sync":
+                return self._send(200, sync(conn))
+            m = re.fullmatch(r"/api/tickets/(\d+)", path)
+            if m and method == "PATCH":
+                return self._send(200, update(conn, int(m[1]), **self._json()))
+            if m and method == "DELETE":
+                delete(conn, int(m[1]))
+                return self._send(200, {"deleted": int(m[1])})
+            return self._send(404, {"error": "not found"})
+        except KeyError:
+            return self._send(404, {"error": "no such ticket"})
+        except ValueError as e:
+            return self._send(400, {"error": str(e)})
+        finally:
+            conn.close()
+
+    def do_GET(self):
+        self._route("GET")
+
+    def do_POST(self):
+        self._route("POST")
+
+    def do_PATCH(self):
+        self._route("PATCH")
+
+    def do_DELETE(self):
+        self._route("DELETE")
+
+
+def serve(port):
+    def loop():
+        while True:
+            try:
+                conn = db(); sync(conn); conn.close()
+            except Exception as e:  # keep the board up if cmux is unreachable
+                print(f"sync failed: {e}", file=sys.stderr)
+            time.sleep(15)
+
+    threading.Thread(target=loop, daemon=True).start()
+    print(f"Tickets board on http://127.0.0.1:{port}")
+    ThreadingHTTPServer(("127.0.0.1", port), Board).serve_forever()
+
+
+# --- CLI ---------------------------------------------------------------------------
+
+def main():
+    ap = argparse.ArgumentParser(prog="tk", description="Local ticket board linked to cmux.")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("add", help="create a ticket")
+    p.add_argument("title"); p.add_argument("-p", "--project"); p.add_argument("-d", "--body", default="")
+    p.add_argument("-s", "--status", default="backlog", choices=STATUSES); p.add_argument("-P", "--priority", type=int, default=2, choices=[1, 2, 3])
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("ls", help="list tickets")
+    p.add_argument("-p", "--project", help="project name, or . for the current repo"); p.add_argument("-s", "--status", choices=STATUSES)
+    p.add_argument("-a", "--all", action="store_true", help="include all done tickets"); p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("show", help="show one ticket"); p.add_argument("id", type=int); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("mv", help="move a ticket to a column"); p.add_argument("id", type=int); p.add_argument("status", choices=STATUSES)
+
+    p = sub.add_parser("edit", help="change a ticket's fields")
+    p.add_argument("id", type=int); p.add_argument("--title"); p.add_argument("-d", "--body"); p.add_argument("-p", "--project")
+    p.add_argument("-P", "--priority", type=int, choices=[1, 2, 3])
+
+    p = sub.add_parser("link", help="link a ticket to a cmux workspace, worktree, branch or PR")
+    p.add_argument("id", type=int); p.add_argument("--workspace", help="workspace UUID, or 'here'")
+    p.add_argument("--worktree"); p.add_argument("--branch"); p.add_argument("--pr")
+
+    p = sub.add_parser("done", help="mark done"); p.add_argument("id", type=int)
+    p = sub.add_parser("rm", help="delete a ticket"); p.add_argument("id", type=int)
+    p = sub.add_parser("sync", help="pull status from cmux"); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("serve", help="run the web board"); p.add_argument("--port", type=int, default=PORT)
+    sub.add_parser("open", help="open the board in a cmux browser pane")
+
+    a = ap.parse_args()
+    conn = db()
+    try:
+        if a.cmd == "add":
+            t = create(conn, a.title, a.project or current_project(), a.body, a.status, a.priority)
+            print(json.dumps(t) if a.json else f"Created #{t['id']} {t['title']} ({t['project']}, {t['status']})")
+        elif a.cmd == "ls":
+            project = current_project() if a.project == "." else a.project
+            ts = list_tickets(conn, project, a.status, a.all)
+            print(json.dumps(ts)) if a.json else print_tickets(ts)
+        elif a.cmd == "show":
+            t = get(conn, a.id) or sys.exit(f"No ticket #{a.id}")
+            if a.json:
+                print(json.dumps(t))
+            else:
+                for k in ["id", "title", "project", "status", "priority", "branch", "worktree", "workspace_id", "pr_url"]:
+                    if t[k] not in (None, ""):
+                        print(f"{k:>13}: {t[k]}")
+                if t["body"]:
+                    print("\n" + t["body"])
+        elif a.cmd == "mv":
+            t = update(conn, a.id, status=a.status); print(f"#{t['id']} → {t['status']}")
+        elif a.cmd == "edit":
+            t = update(conn, a.id, title=a.title, body=a.body, project=a.project, priority=a.priority); print(f"Updated #{t['id']}")
+        elif a.cmd == "link":
+            ws = os.environ.get("CMUX_WORKSPACE_ID") if a.workspace == "here" else a.workspace
+            if a.workspace == "here" and not ws:
+                sys.exit("Not inside a cmux workspace")
+            t = update(conn, a.id, workspace_id=ws, worktree=a.worktree and str(Path(a.worktree).resolve()), branch=a.branch, pr_url=a.pr)
+            print(f"Linked #{t['id']}")
+        elif a.cmd == "done":
+            t = update(conn, a.id, status="done"); print(f"#{t['id']} done")
+        elif a.cmd == "rm":
+            get(conn, a.id) or sys.exit(f"No ticket #{a.id}"); delete(conn, a.id); print(f"Deleted #{a.id}")
+        elif a.cmd == "sync":
+            moved = sync(conn)
+            print(json.dumps(moved) if a.json else "\n".join(f"#{m['id']} {m['from']} → {m['to']}" for m in moved) or "Nothing to move.")
+        elif a.cmd == "serve":
+            serve(a.port)
+        elif a.cmd == "open":
+            url = f"http://127.0.0.1:{PORT}"
+            if subprocess.run([cmux_bin(), "browser", "open-split", url], capture_output=True).returncode != 0:
+                subprocess.run(["open", url])
+    except KeyError as e:
+        sys.exit(f"No ticket #{e.args[0]}")
+    except ValueError as e:
+        sys.exit(str(e))
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

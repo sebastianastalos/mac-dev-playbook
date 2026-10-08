@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>local.tickets</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/python3</string><string>{{ tickets_home }}/.local/bin/tk</string><string>serve</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardErrorPath</key><string>{{ tickets_home }}/.local/share/tickets/tk.log</string>
+  <key>StandardOutPath</key><string>{{ tickets_home }}/.local/share/tickets/tk.log</string>
+</dict>
+</plist>
