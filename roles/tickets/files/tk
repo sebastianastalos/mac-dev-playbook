@@ -478,6 +478,8 @@ main{display:grid;grid-template-columns:repeat(6,minmax(200px,1fr));gap:10px;pad
 .att-item .x{border:0;background:transparent;color:var(--dim);font-size:16px;padding:0 4px}.att-item .x:hover{color:var(--red)}
 .drop{border:1px dashed var(--edge);border-radius:8px;padding:10px;text-align:center;color:var(--dim);font-size:12px;margin-top:6px}.drop.over{border-color:var(--green);color:var(--green)}
 .pick{display:inline;color:var(--blue);cursor:pointer;margin:0;font-size:12px}.linkrow{margin-top:6px}.linkrow input{flex:2}.linkrow button{flex:0 0 auto}
+.newbtn{width:100%;text-align:left;color:var(--dim);border-style:dashed;display:flex;justify-content:space-between;align-items:center}
+.newbtn:hover{color:var(--text)}kbd{font:11px ui-monospace,monospace;border:1px solid var(--edge);border-radius:4px;padding:0 4px;color:var(--dim)}
 .task-only{display:none}#form.is-task .task-only{display:flex}#form.is-task .agent-only{display:none}.del-n{color:var(--red)}
 .live{font-weight:600}.live.w{color:var(--orange)}.live.n{color:var(--amber)}
 .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);margin-right:4px;animation:pulse 1.6s ease-in-out infinite}
@@ -508,12 +510,13 @@ dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>
 <textarea name="note" placeholder="The worker gets this as its next instruction"></textarea>
 <div class="actions"><button value="send">Send back</button><button value="cancel" formnovalidate>Cancel</button></div></form></dialog>
 <dialog id="edit"><form method="dialog" id="form">
-<label>Title</label><input name="title" required>
+<h3 id="edithead" style="margin:0 0 4px;font-size:16px"></h3>
+<label>Title</label><input name="title" required placeholder="What needs doing?">
 <div class="row"><div><label>Project</label><input name="project" list="projects"></div>
 <div><label>Priority</label><select name="priority"><option value="1">High</option><option value="2">Normal</option><option value="3">Low</option></select></div>
 <div><label>Status</label><select name="status"></select></div></div>
 <div class="row task-only"><div><label>Due</label><input name="due" type="date"></div><div><label>Waiting on</label><input name="waiting_on" placeholder="Who or what you're waiting for"></div></div>
-<label>Details</label><textarea name="body"></textarea>
+<label>Notes</label><textarea name="body" placeholder="Anything worth remembering – who, what, order numbers…"></textarea>
 <div class="agent-only"><div class="row"><div><label>Branch</label><input name="branch"></div><div><label>PR URL</label><input name="pr_url"></div></div>
 <label>Worktree</label><input name="worktree"><label>cmux workspace</label><input name="workspace_id"></div>
 <label>Attachments</label>
@@ -521,7 +524,7 @@ dialog textarea{min-height:120px;resize:vertical}.row{display:flex;gap:8px}.row>
 <div class="drop" id="drop">Drop files or paste a screenshot here · <label class="pick">choose files<input type="file" id="pickfile" multiple hidden></label></div>
 <div class="row linkrow"><input id="linkurl" placeholder="https://… link"><input id="linklabel" placeholder="Label (optional)"><button type="button" id="addlink">Add link</button></div>
 <div class="row"><div><label>Board</label><select name="board"><option value="tasks">Tasks</option><option value="agents">Agents</option></select></div><div></div><div></div></div>
-<div class="actions"><button value="save">Save</button><button value="cancel" formnovalidate>Cancel</button><span class="spacer"></span><button value="delete" class="danger" formnovalidate>Delete</button></div>
+<div class="actions"><button value="save" id="savebtn">Save</button><button value="cancel" formnovalidate>Cancel</button><span class="spacer"></span><button value="delete" class="danger" id="delbtn" formnovalidate>Delete</button></div>
 </form></dialog>
 <script>
 const VIEWS={
@@ -569,7 +572,7 @@ function render(){
     if(view==="tasks"&&id!=="done")items=items.sort((a,b)=>(a.due||"9999").localeCompare(b.due||"9999")||a.priority-b.priority);
     const addable=view==="tasks"?id==="todo":(id==="backlog"||id==="todo");
     return `<section class="col" data-status="${id}"><h2><span class="dot" style="background:${color}"></span>${name}<span class="spacer"></span>${items.length}</h2>
-    ${addable?`<form class="add" data-status="${id}"><input placeholder="${view==="tasks"?"+ Add task (end with fri, tmr, 15/10…)":"+ Add ticket"}" name="title"></form>`:""}
+    ${addable?(view==="tasks"?`<button class="newbtn" data-new="${id}">+ New task <kbd>N</kbd></button>`:`<form class="add" data-status="${id}"><input placeholder="+ Add ticket" name="title"></form>`):""}
     ${items.map(card).join("")}</section>`}).join("");
 }
 function card(t){const n=(t.attachments||[]).length;
@@ -643,18 +646,28 @@ backDlg.addEventListener("close",async()=>{const id=backing;backing=null;
   load()});
 // --- edit dialog + attachments ---
 const FIELDS_EDIT=["title","project","priority","status","body","branch","pr_url","worktree","workspace_id","due","waiting_on","board"];
-function renderAtt(t){const list=t.attachments||[];
+let pending={files:[],links:[]};
+function renderAtt(t){
+  if(!t.id){const items=[...pending.links.map((l,i)=>({k:"l",i,label:l.label||l.url,icon:LINK})),...pending.files.map((f,i)=>({k:"f",i,label:f.name,icon:CLIP,img:f.type.startsWith("image/")?URL.createObjectURL(f):""}))];
+    $("#att").innerHTML=items.length?items.map(a=>`<div class="att-item">${a.img?`<img src="${a.img}" alt="">`:""}<span class="att-name">${a.icon}${esc(a.label)}</span>
+      <button type="button" class="x" data-pend="${a.k}${a.i}" title="Remove">×</button></div>`).join(""):`<p class="muted" style="margin:2px 0">Added when you save.</p>`;return}
+  const list=t.attachments||[];
   $("#att").innerHTML=list.length?list.map(a=>`<div class="att-item">${a.image?`<a href="${esc(a.url)}" target="_blank"><img src="${esc(a.url)}" alt=""></a>`:""}
     <a href="${esc(a.url)}" target="_blank" class="att-name">${a.kind==="link"?LINK:CLIP}${esc(a.label)}</a>
     <button type="button" class="x" data-del="${a.id}" title="Remove">×</button></div>`).join(""):`<p class="muted" style="margin:2px 0">None yet.</p>`}
 async function refreshEditing(){const all=await api("GET","/api/tickets");tickets=all;const t=all.find(x=>x.id===editing.id);if(t){editing=t;renderAtt(t)}}
+function openNew(status="todo",title=""){pending={files:[],links:[]};
+  openEdit({id:null,title,board:view,status:view==="tasks"?status:(status||"backlog"),priority:2,project:$("#project").value||""});
+  setTimeout(()=>form.title.focus(),30)}
 function openEdit(t){editing=t;const b=t.board||"agents";
+  $("#edithead").textContent=t.id?`#${t.id}`:(b==="tasks"?"New task":"New ticket");$("#delbtn").style.display=t.id?"":"none";
   form.status.innerHTML=VIEWS[b].map(([id,name])=>`<option value="${id}">${name}</option>`).join("");
   for(const k of FIELDS_EDIT)form[k].value=t[k]??(k==="board"?"agents":"");
   form.classList.toggle("is-task",b==="tasks");renderAtt(t);$("#linkurl").value="";$("#linklabel").value="";dlg.showModal()}
 form.board.onchange=()=>{const b=form.board.value,cur=form.status.value;form.status.innerHTML=VIEWS[b].map(([id,name])=>`<option value="${id}">${name}</option>`).join("");
   form.status.value=VIEWS[b].some(c=>c[0]===cur)?cur:"todo";form.classList.toggle("is-task",b==="tasks")};
-async function upload(files){for(const f of files){
+async function upload(files){if(!editing.id){pending.files.push(...files);renderAtt(editing);return}
+  for(const f of files){
   await fetch(`/api/tickets/${editing.id}/files`,{method:"POST",headers:{"X-Tickets":"1","X-Filename":encodeURIComponent(f.name||"pasted.png"),"Content-Type":"application/octet-stream"},body:f})}
   await refreshEditing()}
 $("#pickfile").onchange=e=>{upload([...e.target.files]);e.target.value=""};
@@ -665,9 +678,12 @@ drop.addEventListener("drop",e=>{e.preventDefault();e.stopPropagation();drop.cla
 dlg.addEventListener("paste",e=>{const files=[...(e.clipboardData?.files||[])];if(!files.length)return;e.preventDefault();
   upload(files.map((f,i)=>f.name&&f.name!=="image.png"?f:new File([f],`screenshot-${new Date().toISOString().slice(0,19).replace(/[T:]/g,"-")}${i?"-"+i:""}.png`,{type:f.type})))});
 $("#addlink").onclick=async()=>{const url=$("#linkurl").value.trim();if(!url)return;
+  if(!editing.id){pending.links.push({url:/^[a-z]+:/i.test(url)?url:"https://"+url,label:$("#linklabel").value.trim()});$("#linkurl").value="";$("#linklabel").value="";renderAtt(editing);return}
   try{await api("POST",`/api/tickets/${editing.id}/links`,{url:/^[a-z]+:/i.test(url)?url:"https://"+url,label:$("#linklabel").value.trim()})}catch(err){alertLine(err.message);return}
   $("#linkurl").value="";$("#linklabel").value="";refreshEditing()};
 $("#linkurl").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();$("#addlink").click()}});
+$("#att").addEventListener("click",e=>{const p=e.target.closest("[data-pend]");if(!p)return;const k=p.dataset.pend[0],i=+p.dataset.pend.slice(1);
+  (k==="f"?pending.files:pending.links).splice(i,1);renderAtt(editing)});
 $("#att").addEventListener("click",async e=>{const x=e.target.closest("[data-del]");if(!x)return;await api("DELETE",`/api/attachments/${x.dataset.del}`);refreshEditing()});
 function alertLine(msg){$("#att").insertAdjacentHTML("beforeend",`<p class="del-n" style="margin:4px 0">${esc(msg)}</p>`)}
 const rvDlg=$("#rv");
@@ -680,10 +696,21 @@ document.addEventListener("click",e=>{const c=e.target.closest(".card");if(!c||e
   const t=tickets.find(x=>x.id==c.dataset.id);if(t.status==="review"||(t.status==="done"&&t.review)){openReview(t);return}openEdit(t)});
 dlg.addEventListener("close",async()=>{const t=editing;editing=null;if(!t)return;
   if(dlg.returnValue==="delete"){await api("DELETE","/api/tickets/"+t.id)}
+  else if(dlg.returnValue==="save"&&!t.id){const d=Object.fromEntries(new FormData(form));d.priority=+d.priority;
+    if(!d.due){delete d.due;d.quick=true}
+    try{const made=await api("POST","/api/tickets",d);
+      for(const l of pending.links)await api("POST",`/api/tickets/${made.id}/links`,l);
+      for(const f of pending.files)await fetch(`/api/tickets/${made.id}/files`,{method:"POST",headers:{"X-Tickets":"1","X-Filename":encodeURIComponent(f.name||"pasted.png"),"Content-Type":"application/octet-stream"},body:f});
+    }catch(err){}
+    pending={files:[],links:[]}}
   else if(dlg.returnValue==="save"){const d=Object.fromEntries(new FormData(form));d.priority=+d.priority;
     for(const k of["branch","pr_url","worktree","workspace_id"])if(d[k]===undefined)delete d[k];
     try{await api("PATCH","/api/tickets/"+t.id,d)}catch(err){}}
   load()});
+document.addEventListener("click",e=>{const b=e.target.closest("[data-new]");if(b){e.stopPropagation();openNew(b.dataset.new)}},true);
+document.addEventListener("keydown",e=>{if(e.key.toLowerCase()==="n"&&!e.metaKey&&!e.ctrlKey&&!e.altKey&&!document.querySelector("dialog[open]")&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();openNew("todo")}});
+{const q=new URLSearchParams(location.search);if(q.has("new")){view="tasks";store("tk.view",view);history.replaceState(null,"","/");
+  api("GET","/api/tickets").then(all=>{tickets=all;render();openNew("todo",q.get("new")||"")})}}
 load();setInterval(load,4000);
 </script></body></html>"""
 
@@ -926,7 +953,7 @@ def main():
             if a.json:
                 print(json.dumps(t))
             else:
-                for k in ["id", "title", "project", "status", "decision", "decision_note", "priority", "branch", "worktree", "workspace_id", "pr_url"]:
+                for k in ["id", "title", "board", "project", "status", "due", "waiting_on", "decision", "decision_note", "priority", "branch", "worktree", "workspace_id", "pr_url"]:
                     if t[k] not in (None, ""):
                         print(f"{k:>13}: {t[k]}")
                 if t["body"]:
