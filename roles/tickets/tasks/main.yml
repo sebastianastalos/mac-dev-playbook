@@ -2,11 +2,12 @@
 # tk: local ticket board (CLI + web board on 127.0.0.1:7717), kept running by launchd.
 # Status sync from cmux runs via Claude Code hooks (see claude_code role).
 
+# 0700: tickets, attachments and screenshots are readable by this account only.
 - name: Create tickets data directory
   ansible.builtin.file:
     path: "{{ tickets_home }}/.local/share/tickets"
     state: directory
-    mode: "0755"
+    mode: "0700"
 
 - name: Install tk
   ansible.builtin.copy:
@@ -59,4 +60,32 @@
     launchctl bootstrap gui/{{ ansible_facts['user_uid'] }}
     {{ tickets_home }}/Library/LaunchAgents/local.tickets.plist
   when: tickets_plist.changed or tickets_loaded.rc != 0
+  changed_when: true
+
+# Daily zip of the board's data to iCloud Drive/Backups/tickets, newest 14 kept.
+# Restore with: tk restore <zip> --yes
+- name: Install tickets backup launch agent
+  ansible.builtin.template:
+    src: local.tickets.backup.plist.j2
+    dest: "{{ tickets_home }}/Library/LaunchAgents/local.tickets.backup.plist"
+    mode: "0644"
+  register: tickets_backup_plist
+
+- name: Check whether the tickets backup is loaded
+  ansible.builtin.command: launchctl print gui/{{ ansible_facts['user_uid'] }}/local.tickets.backup
+  register: tickets_backup_loaded
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Unload outdated tickets backup
+  ansible.builtin.command: launchctl bootout gui/{{ ansible_facts['user_uid'] }}/local.tickets.backup
+  when: tickets_backup_plist.changed and tickets_backup_loaded.rc == 0
+  changed_when: true
+
+- name: Load tickets backup
+  ansible.builtin.command: >-
+    launchctl bootstrap gui/{{ ansible_facts['user_uid'] }}
+    {{ tickets_home }}/Library/LaunchAgents/local.tickets.backup.plist
+  when: tickets_backup_plist.changed or tickets_backup_loaded.rc != 0
   changed_when: true

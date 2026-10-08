@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS shots (
 
 def db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(DB_PATH.parent, 0o700)  # tickets are yours alone, not other accounts on this Mac
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -275,6 +276,56 @@ def add_shot(conn, tid, src, caption=""):
 def clear_shots(conn, tid):
     conn.execute("DELETE FROM shots WHERE ticket_id = ?", (tid,))
     shutil.rmtree(SHOTS / str(tid), ignore_errors=True)
+
+
+BACKUP_DIR = Path.home() / "Library/Mobile Documents/com~apple~CloudDocs/Backups/tickets"
+
+
+def backup(dest=BACKUP_DIR, keep=14):
+    """Zip a consistent copy of the database plus files, screenshots and briefs; keep the newest `keep`."""
+    import datetime as dt, tempfile, zipfile
+    dest = Path(dest).expanduser()
+    dest.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now().strftime("%Y-%m-%d")
+    out = dest / f"tickets-{stamp}.zip"
+    with tempfile.TemporaryDirectory() as tmp:
+        snap = Path(tmp) / "tickets.db"
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(snap)
+        src.backup(dst)  # safe while the board is writing
+        dst.close(); src.close()
+        part = out.with_suffix(".zip.part")
+        with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(snap, "tickets.db")
+            for folder in ("files", "shots", "briefs"):
+                base = DB_PATH.parent / folder
+                for f in sorted(base.rglob("*")) if base.is_dir() else []:
+                    if f.is_file():
+                        z.write(f, f"{folder}/{f.relative_to(base)}")
+        part.replace(out)
+    for old in sorted(dest.glob("tickets-*.zip"))[:-keep]:
+        old.unlink()
+    return out
+
+
+def restore(archive):
+    """Replace the board's data with a backup zip; the current data is kept beside it first."""
+    import datetime as dt, zipfile
+    archive = Path(archive).expanduser()
+    with zipfile.ZipFile(archive) as z:
+        names = z.namelist()
+        if "tickets.db" not in names or any(n.startswith("/") or ".." in Path(n).parts for n in names):
+            raise ValueError(f"{archive.name} doesn't look like a tickets backup")
+        home = DB_PATH.parent
+        aside = home.with_name(f"tickets-before-restore-{dt.datetime.now():%Y%m%d-%H%M%S}")
+        if home.exists():
+            home.rename(aside)
+        home.mkdir(parents=True, mode=0o700)
+        z.extractall(home)
+    for keep in ("tk.log",):
+        if (aside / keep).exists():
+            shutil.copy2(aside / keep, home / keep)
+    return aside
 
 
 def delete(conn, tid):
@@ -843,10 +894,21 @@ def main():
     p = sub.add_parser("wait", help="move a task to Waiting on someone"); p.add_argument("id", type=int); p.add_argument("who", nargs="?", default="")
     p = sub.add_parser("rm", help="delete a ticket"); p.add_argument("id", type=int)
     p = sub.add_parser("sync", help="pull status from cmux"); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("backup", help="zip the board's data to iCloud Drive (keeps 14)")
+    p.add_argument("--to", default=str(BACKUP_DIR)); p.add_argument("--keep", type=int, default=14)
+    p = sub.add_parser("restore", help="replace the board's data with a backup zip (current data kept aside)")
+    p.add_argument("archive"); p.add_argument("--yes", action="store_true")
     p = sub.add_parser("serve", help="run the web board"); p.add_argument("--port", type=int, default=PORT)
     sub.add_parser("open", help="open the board in a cmux browser pane")
 
     a = ap.parse_args()
+    if a.cmd == "backup":
+        print(f"Backed up to {backup(a.to, a.keep)}"); return
+    if a.cmd == "restore":
+        if not a.yes:
+            sys.exit(f"This replaces every ticket with the contents of {a.archive}. Run again with --yes, "
+                     "then restart the board: launchctl kickstart -k gui/$(id -u)/local.tickets")
+        print(f"Restored. Previous data kept at {restore(a.archive)}"); return
     conn = db()
     try:
         if a.cmd == "add":
