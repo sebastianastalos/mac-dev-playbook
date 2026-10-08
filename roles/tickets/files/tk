@@ -184,6 +184,7 @@ def print_tickets(tickets):
 PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tickets</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a2a2e'/%3E%3Crect x='6' y='7' width='5' height='18' rx='2' fill='%23d97757'/%3E%3Crect x='13.5' y='7' width='5' height='12' rx='2' fill='%23e5b567'/%3E%3Crect x='21' y='7' width='5' height='7' rx='2' fill='%237ec699'/%3E%3C/svg%3E">
 <style>
 :root{--bg:#1c1c1e;--col:#ffffff0a;--card:#ffffff12;--cardHover:#ffffff1c;--edge:#ffffff14;--text:#e4e4e4;--dim:#8a8a8a;
 --orange:#d97757;--amber:#e5b567;--green:#7ec699;--red:#ff6b6b;--purple:#b48ead;--blue:#5fafff}

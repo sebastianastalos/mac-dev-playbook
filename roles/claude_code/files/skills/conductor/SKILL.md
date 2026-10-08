@@ -19,6 +19,8 @@ Tools:
 
 ## 2. Plan and brief
 
+If `~/.claude/skills/conductor/projects/<project>.md` exists, read it first: it holds that project's base branch, how checks run, and anything every brief must say.
+
 For each candidate ticket:
 1. Work out where it happens (project name ≈ folder name; ask if unclear) and pick the mode:
    - **git repo** → `--repo`: own worktree and branch; runs in parallel safely.
