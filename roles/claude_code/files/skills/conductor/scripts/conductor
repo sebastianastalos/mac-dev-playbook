@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""conductor – start, track and clean up agent workers for tk tickets.
+
+  conductor spawn <ticket> --repo <path> [--base <ref>] [--mode auto]
+  conductor status [--json]
+  conductor cleanup <ticket> [--force]
+
+Each worker gets its own git worktree (~/worktrees/<project>/<id>-<slug>), branch
+(tk/<id>-<slug>) and cmux workspace running Claude Code with the ticket's brief.
+"""
+import argparse, json, os, re, shutil, subprocess, sys, time
+from pathlib import Path
+
+WORKTREES = Path(os.environ.get("CONDUCTOR_WORKTREES", Path.home() / "worktrees"))
+BRIEFS = Path.home() / ".local/share/tickets/briefs"
+MAX_ACTIVE = int(os.environ.get("CONDUCTOR_MAX_ACTIVE", "3"))
+ACTIVE = ("working", "needs-you")
+
+WORKER_RULES = """
+## How to work
+- You are a worker started by the conductor for ticket #{id}. Stay inside this worktree: {worktree}
+- Work only on branch `{branch}`. Do not touch other branches or worktrees.
+- Commit as you go with short Conventional Commit messages. Never add a Co-Authored-By trailer.
+- Do not push, open a PR, merge or delete anything; the conductor does that with the user.
+- If you are blocked or need a decision, ask in this session and wait.
+
+## When you are done
+1. Make sure everything in "Done when" holds (run the tests/build it names).
+2. Commit all work, then run: `tk mv {id} review`
+3. Finish with a short summary: what changed, how you verified it, anything left open.
+"""
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def must(cmd, **kw):
+    r = run(cmd, **kw)
+    if r.returncode != 0:
+        sys.exit(f"{' '.join(cmd[:3])} failed: {(r.stderr or r.stdout).strip()}")
+    return r.stdout.strip()
+
+
+def cmux():
+    return os.environ.get("CMUX_BUNDLED_CLI_PATH") or shutil.which("cmux") or "/Applications/cmux.app/Contents/Resources/bin/cmux"
+
+
+def tk(*args):
+    return json.loads(must(["tk", *args, "--json"]))
+
+
+def slug(title):
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return s[:40].rstrip("-") or "ticket"
+
+
+def default_base(repo):
+    head = run(["git", "-C", repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).stdout.strip()
+    if head:
+        return head
+    for name in ("main", "master"):
+        if run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{name}"]).returncode == 0:
+            return name
+    return must(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])
+
+
+def workspaces():
+    try:
+        return json.loads(must([cmux(), "workspace", "list", "--json"]))["workspaces"]
+    except (ValueError, KeyError):
+        return []
+
+
+def lane(workspace_id):
+    r = run([cmux(), "workspace", "status", "--workspace", workspace_id, "--json"])
+    try:
+        return json.loads(r.stdout).get("effective") if r.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def spawn(a):
+    t = tk("show", str(a.ticket))
+    if t["workspace_id"] and any(w["id"] == t["workspace_id"] for w in workspaces()):
+        sys.exit(f"#{t['id']} already has a live workspace")
+    active = [x for x in tk("ls") if x["status"] in ACTIVE and x["workspace_id"]]
+    if len(active) >= MAX_ACTIVE and not a.force:
+        sys.exit(f"{len(active)} workers already active (max {MAX_ACTIVE}); finish one or pass --force")
+
+    repo = must(["git", "-C", str(Path(a.repo).expanduser()), "rev-parse", "--show-toplevel"])
+    name = f"{t['id']}-{slug(t['title'])}"
+    branch = f"tk/{name}"
+    worktree = WORKTREES / (t["project"] or Path(repo).name) / name
+    base = a.base or default_base(repo)
+
+    if not worktree.exists():
+        worktree.parent.mkdir(parents=True, exist_ok=True)
+        must(["git", "-C", repo, "worktree", "add", "-b", branch, str(worktree), base])
+
+    BRIEFS.mkdir(parents=True, exist_ok=True)
+    brief = BRIEFS / f"{t['id']}.md"
+    body = t["body"].strip() or "(No brief written. Ask the user what this ticket needs before changing anything.)"
+    brief.write_text(f"# Ticket #{t['id']}: {t['title']}\n\n{body}\n" + WORKER_RULES.format(id=t["id"], worktree=worktree, branch=branch))
+
+    prompt = f"Read the brief at {brief} and carry it out."
+    command = f"claude --permission-mode {a.mode} -n 'tk#{t['id']}' '{prompt}'"
+    title = f"#{t['id']} {t['title']}"[:60]
+    must([cmux(), "new-workspace", "--name", title, "--description", t["title"], "--cwd", str(worktree),
+          "--command", command, "--env", f"TK_TICKET={t['id']}", "--focus", "false"])
+
+    ws = next((w for w in workspaces() if w.get("custom_title") == title or w.get("title") == title), None)
+    if not ws:
+        sys.exit(f"workspace created but not found by name; link it with: tk link {t['id']} --workspace <uuid>")
+    must(["tk", "link", str(t["id"]), "--workspace", ws["id"], "--worktree", str(worktree), "--branch", branch])
+    must(["tk", "mv", str(t["id"]), "working"])
+    # Claude asks once per new folder whether to trust it; cmux doesn't flag that as "needs you"
+    time.sleep(6)
+    screen = run([cmux(), "read-screen", "--workspace", ws["id"], "--lines", "40"]).stdout
+    waiting = "trust this folder" in screen
+    print(json.dumps({"ticket": t["id"], "workspace": ws["id"], "worktree": str(worktree), "branch": branch, "base": base,
+                      "waiting_on_folder_trust": waiting}))
+
+
+def status(a):
+    live = {w["id"]: w for w in workspaces()}
+    rows = []
+    for t in tk("ls"):
+        if not t["workspace_id"] and t["status"] not in ACTIVE + ("review",):
+            continue
+        ws = live.get(t["workspace_id"])
+        commits = ""
+        if t["worktree"] and Path(t["worktree"]).exists():
+            base = default_base(t["worktree"])
+            commits = run(["git", "-C", t["worktree"], "rev-list", "--count", f"{base}..HEAD"]).stdout.strip()
+        rows.append({"id": t["id"], "title": t["title"], "status": t["status"],
+                     "lane": lane(ws["id"]) if ws else None, "workspace": bool(ws),
+                     "branch": t["branch"], "worktree": t["worktree"], "commits": commits, "pr": t["pr_url"]})
+    if a.json:
+        print(json.dumps(rows))
+        return
+    if not rows:
+        print("No workers.")
+    for r in rows:
+        ws = r["lane"] or ("closed" if not r["workspace"] else "?")
+        print(f"#{r['id']:<4} {r['status']:<10} cmux:{ws:<16} {r['commits'] or 0} commits  {r['branch'] or ''}  {r['pr'] or ''}  {r['title']}")
+
+
+def cleanup(a):
+    t = tk("show", str(a.ticket))
+    if t["status"] != "done" and not a.force:
+        sys.exit(f"#{t['id']} is {t['status']}, not done; pass --force to clean up anyway")
+    if t["worktree"] and Path(t["worktree"]).exists():
+        dirty = run(["git", "-C", t["worktree"], "status", "--porcelain"]).stdout.strip()
+        if dirty and not a.force:
+            sys.exit(f"{t['worktree']} has uncommitted changes; pass --force to discard them")
+        repo = str(Path(must(["git", "-C", t["worktree"], "rev-parse", "--path-format=absolute", "--git-common-dir"])).parent)
+        must(["git", "-C", repo, "worktree", "remove", *(["--force"] if a.force else []), t["worktree"]])
+        if t["branch"]:
+            r = run(["git", "-C", repo, "branch", "-d", t["branch"]])
+            if r.returncode != 0:
+                print(f"kept branch {t['branch']} (not merged locally): {r.stderr.strip()}", file=sys.stderr)
+    if t["workspace_id"] and any(w["id"] == t["workspace_id"] for w in workspaces()):
+        # the worker's Claude session is still open in it; clean-up is approved, so close it anyway
+        r = run([cmux(), "workspace", "close", t["workspace_id"], "--force"])
+        if r.returncode != 0:
+            print(f"could not close workspace: {(r.stderr or r.stdout).strip()}", file=sys.stderr)
+    run(["tk", "link", str(t["id"]), "--workspace", "", "--worktree", ""])
+    print(f"Cleaned up #{t['id']}")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="conductor")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("spawn"); p.add_argument("ticket", type=int); p.add_argument("--repo", required=True)
+    p.add_argument("--base"); p.add_argument("--mode", default="auto",
+                   choices=["auto", "acceptEdits", "manual", "plan", "dontAsk"])
+    p.add_argument("--force", action="store_true")
+    p = sub.add_parser("status"); p.add_argument("--json", action="store_true")
+    p = sub.add_parser("cleanup"); p.add_argument("ticket", type=int); p.add_argument("--force", action="store_true")
+    a = ap.parse_args()
+    {"spawn": spawn, "status": status, "cleanup": cleanup}[a.cmd](a)
+
+
+if __name__ == "__main__":
+    main()

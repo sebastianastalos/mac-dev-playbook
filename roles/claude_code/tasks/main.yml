@@ -15,6 +15,13 @@
     mode: "0644"
     directory_mode: "0755"
 
+- name: Deploy Claude Code skills
+  ansible.builtin.copy:
+    src: skills/
+    dest: "{{ ansible_facts['env']['HOME'] }}/.claude/skills/"
+    mode: preserve
+    directory_mode: "0755"
+
 - name: Deploy Claude Code status line script
   ansible.builtin.copy:
     src: statusline.py
