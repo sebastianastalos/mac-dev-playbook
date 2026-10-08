@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """conductor – start, track and clean up agent workers for tk tickets.
 
-  conductor spawn <ticket> --repo <path> [--base <ref>] [--mode auto]
+  conductor spawn <ticket> [--repo <path> | --dir <path>] [--base <ref>] [--mode auto] [--dry-run]
   conductor status [--json]
   conductor cleanup <ticket> [--force]
 
-Each worker gets its own git worktree (~/worktrees/<project>/<id>-<slug>), branch
-(tk/<id>-<slug>) and cmux workspace running Claude Code with the ticket's brief.
+Each worker gets a cmux workspace running Claude Code with the ticket's brief, in:
+  --repo  its own git worktree (~/worktrees/<project>/<id>-<slug>) on branch tk/<id>-<slug>
+  --dir   a plain folder, worked on directly (one worker per folder)
+  neither a scratch folder (~/worktrees/<project>/<id>-<slug>) whose RESULT.md is the deliverable
 """
 import argparse, json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
@@ -16,7 +18,8 @@ BRIEFS = Path.home() / ".local/share/tickets/briefs"
 MAX_ACTIVE = int(os.environ.get("CONDUCTOR_MAX_ACTIVE", "3"))
 ACTIVE = ("working", "needs-you")
 
-WORKER_RULES = """
+WORKER_RULES = {}
+WORKER_RULES["git"] = """
 ## How to work
 - You are a worker started by the conductor for ticket #{id}. Stay inside this worktree: {worktree}
 - Work only on branch `{branch}`. Do not touch other branches or worktrees.
@@ -28,6 +31,33 @@ WORKER_RULES = """
 1. Make sure everything in "Done when" holds (run the tests/build it names).
 2. Commit all work, then run: `tk mv {id} review`
 3. Finish with a short summary: what changed, how you verified it, anything left open.
+"""
+
+WORKER_RULES["dir"] = """
+## How to work
+- You are a worker started by the conductor for ticket #{id}, working directly in: {worktree}
+- This folder is not under version control, so nothing you change can be undone. Don't delete or
+  overwrite files you didn't create unless the brief says so; when unsure, ask first.
+- No other worker runs in this folder while you do.
+- If you are blocked or need a decision, ask in this session and wait.
+
+## When you are done
+1. Make sure everything in "Done when" holds.
+2. Run: `tk mv {id} review`
+3. Finish with a short summary: what you changed (list the files), how you checked it, anything left open.
+"""
+
+WORKER_RULES["scratch"] = """
+## How to work
+- You are a worker started by the conductor for ticket #{id}. Your working folder is: {worktree}
+- Put the deliverable in RESULT.md in that folder (plus any supporting files next to it).
+- Don't change files outside that folder unless the brief explicitly asks for it.
+- If you are blocked or need a decision, ask in this session and wait.
+
+## When you are done
+1. Make sure everything in "Done when" holds and RESULT.md is complete on its own.
+2. Run: `tk mv {id} review`
+3. Finish with a short summary of the result.
 """
 
 
@@ -80,6 +110,16 @@ def lane(workspace_id):
         return None
 
 
+def mode_of(t):
+    """How a ticket's worker was set up: git, dir or scratch (None when not linked)."""
+    path = t["worktree"] and Path(t["worktree"])
+    if not path:
+        return None
+    if t["branch"]:
+        return "git"
+    return "scratch" if WORKTREES in path.parents else "dir"
+
+
 def spawn(a):
     t = tk("show", str(a.ticket))
     if t["workspace_id"] and any(w["id"] == t["workspace_id"] for w in workspaces()):
@@ -88,20 +128,41 @@ def spawn(a):
     if len(active) >= MAX_ACTIVE and not a.force:
         sys.exit(f"{len(active)} workers already active (max {MAX_ACTIVE}); finish one or pass --force")
 
-    repo = must(["git", "-C", str(Path(a.repo).expanduser()), "rev-parse", "--show-toplevel"])
     name = f"{t['id']}-{slug(t['title'])}"
-    branch = f"tk/{name}"
-    worktree = WORKTREES / (t["project"] or Path(repo).name) / name
-    base = a.base or default_base(repo)
+    branch = base = None
+    if a.repo:
+        target = Path(a.repo).expanduser()
+        r = run(["git", "-C", str(target), "rev-parse", "--show-toplevel"])
+        if r.returncode != 0:
+            sys.exit(f"{target} is not a git repo; use --dir {target} to work in it directly")
+        mode, repo = "git", r.stdout.strip()
+        branch = f"tk/{name}"
+        worktree = WORKTREES / (t["project"] or Path(repo).name) / name
+        base = a.base or default_base(repo)
+    elif a.dir:
+        mode, worktree = "dir", Path(a.dir).expanduser().resolve()
+        if not worktree.is_dir():
+            sys.exit(f"{worktree} is not a folder")
+        busy = [x for x in tk("ls") if x["id"] != t["id"] and x["status"] in ACTIVE and x["worktree"] == str(worktree)]
+        if busy:
+            sys.exit(f"#{busy[0]['id']} is already working in {worktree}; one worker per folder without git")
+    else:
+        mode, worktree = "scratch", WORKTREES / (t["project"] or "scratch") / name
 
-    if not worktree.exists():
+    if a.dry_run:
+        print(json.dumps({"ticket": t["id"], "mode": mode, "worktree": str(worktree), "branch": branch, "base": base}))
+        return
+
+    if mode == "git" and not worktree.exists():
         worktree.parent.mkdir(parents=True, exist_ok=True)
         must(["git", "-C", repo, "worktree", "add", "-b", branch, str(worktree), base])
+    elif mode == "scratch":
+        worktree.mkdir(parents=True, exist_ok=True)
 
     BRIEFS.mkdir(parents=True, exist_ok=True)
     brief = BRIEFS / f"{t['id']}.md"
     body = t["body"].strip() or "(No brief written. Ask the user what this ticket needs before changing anything.)"
-    brief.write_text(f"# Ticket #{t['id']}: {t['title']}\n\n{body}\n" + WORKER_RULES.format(id=t["id"], worktree=worktree, branch=branch))
+    brief.write_text(f"# Ticket #{t['id']}: {t['title']}\n\n{body}\n" + WORKER_RULES[mode].format(id=t["id"], worktree=worktree, branch=branch))
 
     prompt = f"Read the brief at {brief} and carry it out."
     command = f"claude --permission-mode {a.mode} -n 'tk#{t['id']}' '{prompt}'"
@@ -112,14 +173,14 @@ def spawn(a):
     ws = next((w for w in workspaces() if w.get("custom_title") == title or w.get("title") == title), None)
     if not ws:
         sys.exit(f"workspace created but not found by name; link it with: tk link {t['id']} --workspace <uuid>")
-    must(["tk", "link", str(t["id"]), "--workspace", ws["id"], "--worktree", str(worktree), "--branch", branch])
+    must(["tk", "link", str(t["id"]), "--workspace", ws["id"], "--worktree", str(worktree), *(["--branch", branch] if branch else [])])
     must(["tk", "mv", str(t["id"]), "working"])
     # Claude asks once per new folder whether to trust it; cmux doesn't flag that as "needs you"
     time.sleep(6)
     screen = run([cmux(), "read-screen", "--workspace", ws["id"], "--lines", "40"]).stdout
     waiting = "trust this folder" in screen
-    print(json.dumps({"ticket": t["id"], "workspace": ws["id"], "worktree": str(worktree), "branch": branch, "base": base,
-                      "waiting_on_folder_trust": waiting}))
+    print(json.dumps({"ticket": t["id"], "mode": mode, "workspace": ws["id"], "worktree": str(worktree), "branch": branch,
+                      "base": base, "waiting_on_folder_trust": waiting}))
 
 
 def status(a):
@@ -130,12 +191,12 @@ def status(a):
             continue
         ws = live.get(t["workspace_id"])
         commits = ""
-        if t["worktree"] and Path(t["worktree"]).exists():
+        if mode_of(t) == "git" and Path(t["worktree"]).exists():
             base = default_base(t["worktree"])
             commits = run(["git", "-C", t["worktree"], "rev-list", "--count", f"{base}..HEAD"]).stdout.strip()
         rows.append({"id": t["id"], "title": t["title"], "status": t["status"],
                      "lane": lane(ws["id"]) if ws else None, "workspace": bool(ws),
-                     "branch": t["branch"], "worktree": t["worktree"], "commits": commits, "pr": t["pr_url"]})
+                     "mode": mode_of(t), "branch": t["branch"], "worktree": t["worktree"], "commits": commits, "pr": t["pr_url"]})
     if a.json:
         print(json.dumps(rows))
         return
@@ -143,14 +204,17 @@ def status(a):
         print("No workers.")
     for r in rows:
         ws = r["lane"] or ("closed" if not r["workspace"] else "?")
-        print(f"#{r['id']:<4} {r['status']:<10} cmux:{ws:<16} {r['commits'] or 0} commits  {r['branch'] or ''}  {r['pr'] or ''}  {r['title']}")
+        where = f"{r['commits'] or 0} commits  {r['branch']}" if r["mode"] == "git" else f"{r['mode'] or '-'}: {r['worktree'] or ''}"
+        print(f"#{r['id']:<4} {r['status']:<10} cmux:{ws:<16} {where}  {r['pr'] or ''}  {r['title']}")
 
 
 def cleanup(a):
     t = tk("show", str(a.ticket))
     if t["status"] != "done" and not a.force:
         sys.exit(f"#{t['id']} is {t['status']}, not done; pass --force to clean up anyway")
-    if t["worktree"] and Path(t["worktree"]).exists():
+    mode = mode_of(t)
+    path = t["worktree"] and Path(t["worktree"])
+    if mode == "git" and path.exists():
         dirty = run(["git", "-C", t["worktree"], "status", "--porcelain"]).stdout.strip()
         if dirty and not a.force:
             sys.exit(f"{t['worktree']} has uncommitted changes; pass --force to discard them")
@@ -160,6 +224,17 @@ def cleanup(a):
             r = run(["git", "-C", repo, "branch", "-d", t["branch"]])
             if r.returncode != 0:
                 print(f"kept branch {t['branch']} (not merged locally): {r.stderr.strip()}", file=sys.stderr)
+    elif mode == "scratch" and path.exists():
+        # keep the deliverable on the ticket before the folder goes
+        result = path / "RESULT.md"
+        extra = [p.name for p in path.iterdir() if p.name != "RESULT.md"]
+        if extra and not a.force:
+            sys.exit(f"{path} has files besides RESULT.md ({', '.join(extra[:5])}); move what you need, or pass --force")
+        if result.exists():
+            body = t["body"].rstrip() + "\n\n## Result\n\n" + result.read_text().strip() + "\n"
+            must(["tk", "edit", str(t["id"]), "-d", body])
+        shutil.rmtree(path)
+    # mode == "dir": the folder is the user's own; leave it as it is
     if t["workspace_id"] and any(w["id"] == t["workspace_id"] for w in workspaces()):
         # the worker's Claude session is still open in it; clean-up is approved, so close it anyway
         r = run([cmux(), "workspace", "close", t["workspace_id"], "--force"])
@@ -172,7 +247,11 @@ def cleanup(a):
 def main():
     ap = argparse.ArgumentParser(prog="conductor")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("spawn"); p.add_argument("ticket", type=int); p.add_argument("--repo", required=True)
+    p = sub.add_parser("spawn"); p.add_argument("ticket", type=int)
+    where = p.add_mutually_exclusive_group()
+    where.add_argument("--repo", help="git repo: worker gets its own worktree and branch")
+    where.add_argument("--dir", help="plain folder: worker works in it directly, one at a time")
+    p.add_argument("--dry-run", action="store_true", help="print the plan without creating anything")
     p.add_argument("--base"); p.add_argument("--mode", default="auto",
                    choices=["auto", "acceptEdits", "manual", "plan", "dontAsk"])
     p.add_argument("--force", action="store_true")

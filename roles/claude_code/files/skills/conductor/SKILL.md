@@ -20,7 +20,11 @@ Tools:
 ## 2. Plan and brief
 
 For each candidate ticket:
-1. Work out the repo it belongs to (project name ≈ repo folder; ask if unclear) and skim the code enough to scope it.
+1. Work out where it happens (project name ≈ folder name; ask if unclear) and pick the mode:
+   - **git repo** → `--repo`: own worktree and branch; runs in parallel safely.
+   - **plain folder, not git** → `--dir`: works in the folder directly, one worker per folder, and changes can't be undone – say so in the plan. If it's code, suggest `git init` first.
+   - **no folder** (research, writing, planning, ops) → no flag: scratch folder whose `RESULT.md` is the deliverable.
+   Skim the code or material enough to scope it.
 2. Reject or split tickets that would edit the same files as another ticket in this batch – parallel workers on overlapping files end in merge conflicts.
 3. Write the brief into the ticket body with `tk edit <id> -d "<brief>"`, using this shape:
 
@@ -44,10 +48,14 @@ Then show the user the plan – tickets, repo, base branch, one line per brief �
 ## 3. Spawn
 
 ```
-conductor spawn <id> --repo <repo path> [--base <branch>]
+conductor spawn <id> --repo <repo path> [--base <branch>]   # git
+conductor spawn <id> --dir <folder>                          # plain folder
+conductor spawn <id>                                         # scratch
 ```
 
-It creates `~/worktrees/<project>/<id>-<slug>` on branch `tk/<id>-<slug>`, writes the brief plus worker rules to `~/.local/share/tickets/briefs/<id>.md`, opens a cmux workspace running `claude --permission-mode auto` with the brief, links everything to the ticket and moves it to Working. Workers commit but never push, open PRs, merge or delete.
+Add `--dry-run` to see the mode and paths without creating anything – useful for the plan you show the user.
+
+In git mode it creates `~/worktrees/<project>/<id>-<slug>` on branch `tk/<id>-<slug>`, writes the brief plus worker rules to `~/.local/share/tickets/briefs/<id>.md`, opens a cmux workspace running `claude --permission-mode auto` with the brief, links everything to the ticket and moves it to Working. Workers commit but never push, open PRs, merge or delete.
 
 If the output says `"waiting_on_folder_trust": true`, Claude Code is asking whether to trust the new worktree folder. That is the user's call: tell them to answer it in that workspace (or to trust `~/worktrees` once, which covers every future worker).
 
@@ -58,6 +66,10 @@ If the output says `"waiting_on_folder_trust": true`, Claude Code is asking whet
 - A worker that finishes moves its ticket to Review.
 
 ## 5. Wrap up (per ticket in Review)
+
+Without git (`--dir` / scratch) there's no branch or PR: review the files the worker lists (dir) or its `RESULT.md` (scratch), check "Done when", report to the user, and move the ticket to Done when they accept it. `conductor cleanup` then copies a scratch `RESULT.md` into the ticket under "## Result" and deletes the scratch folder (it refuses if other files are there); for `--dir` it only closes the workspace and never touches the folder.
+
+For git:
 
 1. Review the work: `git -C <worktree> log --oneline <base>..HEAD` and the diff. Run the "Done when" checks yourself. For anything non-trivial, have a separate reviewer subagent read the diff against the brief.
 2. Report to the user: what changed, check results, review findings. Send fixes back to the same worker (it's still open in its workspace) rather than editing its worktree yourself.
