@@ -2,7 +2,7 @@
 const C = {
   orange: "#d97757", green: "#7ec699", amber: "#e5b567", red: "#ff6b6b",
   text: "#d0d0d0", dim: "#8a8a8a", idle: "#4a4a4a",
-  card: "#ffffff0d", cardOn: "#ffffff21", edge: "#ffffff14", edgeOn: "#ffffff38", rail: "#e6e6e6",
+  card: "#ffffff0d", cardOn: "#ffffff21", rail: "#e6e6e6",
 };
 
 function state(w) {
@@ -120,8 +120,6 @@ sidebar(() =>
         ])
           .background(() => (w().selected ? C.cardOn : C.card))
           .hoverBackground("#ffffff10")
-          .borderColor(() => (w().selected ? C.edgeOn : C.edge))
-          .borderWidth(1)
           .cornerRadius(9)
           .cursor("pointer")
           .onTap(() => cmux("workspace.select", { workspace_id: w().id }))
