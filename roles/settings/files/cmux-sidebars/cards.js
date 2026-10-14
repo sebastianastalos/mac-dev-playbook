@@ -2,7 +2,7 @@
 const C = {
   orange: "#d97757", green: "#7ec699", amber: "#e5b567", red: "#ff6b6b",
   text: "#d0d0d0", dim: "#8a8a8a", idle: "#4a4a4a",
-  card: "#ffffff0d", cardOn: "#ffffff21", rail: "#e6e6e6",
+  cardOn: "#ffffff21", rail: "#e6e6e6",
 };
 
 function state(w) {
@@ -118,7 +118,7 @@ sidebar(() =>
           ])
             .padding(9),
         ])
-          .background(() => (w().selected ? C.cardOn : C.card))
+          .background(() => (w().selected ? C.cardOn : "clear"))
           .hoverBackground("#ffffff10")
           .cornerRadius(9)
           .cursor("pointer")
