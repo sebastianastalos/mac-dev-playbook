@@ -2,7 +2,7 @@
 const C = {
   orange: "#d97757", green: "#7ec699", amber: "#e5b567", red: "#ff6b6b",
   text: "#d0d0d0", dim: "#8a8a8a", idle: "#4a4a4a",
-  cardOn: "#ffffff21", rail: "#e6e6e6",
+  cardOn: "#ffffff14", rail: "#e6e6e6",
 };
 
 function state(w) {
