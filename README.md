@@ -53,16 +53,9 @@ Ansible playbook to automate setting up a fresh Mac for development.
   "reveal in file viewer". To open Bloom from the Finder Dock icon you need a third-party helper
   (Click2Minimize or Supercharge). Bloom's global hotkey is Cmd-Shift-Return; its
   *Intercept Command-Click Events from Dock* option needs Accessibility permission.
-- **Raycast** – Set the hotkey (it does not claim ⌘Space automatically) and sign in to sync
-  settings. Raycast config is not managed by this playbook.
-- **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password,
-  Wipr and Obsidian Web Clipper in *Safari → Settings → Extensions*. Safari records an
+- **Safari extensions** – Installing them is automated, but enabling is not. Turn on 1Password
+  and Wipr in *Safari → Settings → Extensions*. Safari records an
   `EnabledByUserGesture` flag per extension, so a scripted flip is unlikely to be honoured.
-- **Web Clipper templates** – Import the three templates in
-  `roles/settings/files/clipper-templates/` via the clipper's settings, then drag *Article* to the
-  top so it acts as the fallback (the first template in the list wins when no trigger matches).
-  Set *Vault* on each to `mycelium` – it defaults to "Last used". Clipper settings live in a
-  SQLite store inside Safari's container, so none of this can be deployed by Ansible.
 - **macOS AutoFill** – In 1Password (8.12.32+), *Settings → Autofill → Set up macOS AutoFill* →
   Turn On, until it shows "Active". If the setup card is missing right after an app update, lock
   and unlock 1Password to refresh it. Then in *System Settings → General → AutoFill & Passwords →
@@ -84,7 +77,6 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - Tailscale
 - cmux
 - Itsycal (menu bar calendar)
-- Raycast (launcher)
 - Bloom (file manager)
 
 **App Store:**
@@ -92,7 +84,6 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - 1Password for Safari (Safari extension)
 - Wipr (Safari content blocker)
 - Colorful Folder (folder icon customiser)
-- Obsidian Web Clipper (Safari extension)
 
 **Other CLI tools:**
 - claude-chats (browse/delete Claude Code chat history, pinned release binary)
@@ -119,7 +110,6 @@ Ansible playbook to automate setting up a fresh Mac for development.
 - **SSH** – Generates an `ed25519` keypair if one doesn't exist, and points `ssh` at the 1Password SSH agent via `IdentityAgent` in `~/.ssh/config` plus `SSH_AUTH_SOCK` in `~/.zshrc`
 - **Shell** – Adds aliases to `~/.zshrc` for git and Docker workflows (see [ALIASES.md](docs/ALIASES.md))
 - **Claude Code** – Two-line status line (limit bars, context, cost, model, branch) and the `glow` mod (colour-coded tool rows, pixel mascot), merged into `~/.claude/settings.json`
-- **Kanban board** – Clones the private [kanban-board](https://github.com/sebastianastalos/kanban-board) repo to `~/kanban-board` and runs its `install.sh`: local kanban (Tasks + Agents boards), `tk`/`t`, Raycast commands, daily iCloud backup and the conductor skill. Needs `gh auth login` for the `sebastianastalos` account
 - **cmux** – Deploys `~/.config/cmux/cmux.json` with appearance and notification settings (frosted grey sidebar), plus a card-style custom sidebar (`cards.js`: agent activity, folder, PR badge, subagent dots)
 - **Ghostty** – Configures font (JetBrainsMono Nerd Font), background blur, and tab bar
 

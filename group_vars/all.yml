@@ -14,7 +14,6 @@ homebrew_casks:
   - docker
   - tailscale
   - font-jetbrains-mono-nerd-font
-  - raycast
 
   - finetune
   - mos
@@ -41,8 +40,6 @@ mas_apps:
     name: "Wipr"
   - id: 1576476152
     name: "Colorful Folder"
-  - id: 6720708363
-    name: "Obsidian Web Clipper"
 
 # Homebrew formulae (CLI tools)
 homebrew_formulae:
@@ -139,8 +136,6 @@ bloom_bundle_id: com.asiafu.Bloom
 
 # Apps to open at login
 login_items:
-  - name: Raycast
-    path: /Applications/Raycast.app
   - name: Bloom
     path: /Applications/Bloom.app
   - name: Amphetamine
